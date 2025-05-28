@@ -169,8 +169,8 @@ public class MetricExtractor {
                                          }
 
                                          try {
-                                             HistoricalMetricsExtractor.HistoricalMetrics historical = historicalExtractor.extract(path, releaseDate, git);                                     int modifications = historical.modifications;
-                                             int authors = historical.authors.size();
+                                             HistoricalMetricsExtractor.HistoricalMetrics historical = historicalExtractor.extract(path, releaseDate, git);                                     int modifications = historical.getModifications();
+                                             int authors = historical.getAuthors().size();
                                             writer.println(
                                                 methodName + "," + releaseId + "," + loc + "," + paramCount + "," + statements + "," +
                                                 cyclomatic + "," + nesting + "," + cognitive + "," + smells + "," + modifications + "," +

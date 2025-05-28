@@ -26,7 +26,7 @@ public class JiraTicketFetcher {
     }
 
     private static JSONObject readJsonFromUrl(String url) throws IOException, JSONException {
-        try (InputStream is = new URL(url).openStream()) {
+        try (InputStream is = java.net.URI.create(url).toURL().openStream()) {
             BufferedReader rd = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
             String jsonText = readAll(rd);
             return new JSONObject(jsonText);

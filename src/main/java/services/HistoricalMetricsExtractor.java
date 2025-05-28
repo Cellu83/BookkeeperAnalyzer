@@ -16,12 +16,20 @@ import java.util.*;
 public class HistoricalMetricsExtractor {
 
     public static class HistoricalMetrics {
-        public int modifications;
-        public Set<String> authors;
+        private int modifications;
+        private final Set<String> authors;
 
         public HistoricalMetrics(int modifications, Set<String> authors) {
             this.modifications = modifications;
             this.authors = authors;
+        }
+
+        public int getModifications() {
+            return modifications;
+        }
+
+        public Set<String> getAuthors() {
+            return authors;
         }
     }
 
@@ -48,12 +56,8 @@ public class HistoricalMetricsExtractor {
 
                 for (DiffEntry diff : diffs) {
                     if (diff.getNewPath().equals(relativePath)) {
-                        List<Edit> edits = diffFormatter.toFileHeader(diff).toEditList();
-                        boolean touchesMethod = true; // Per ora assumiamo di sì
-                        if (touchesMethod) {
-                            modificationCount++;
-                            uniqueAuthors.add(commit.getAuthorIdent().getName());
-                        }
+                        modificationCount++;
+                        uniqueAuthors.add(commit.getAuthorIdent().getName());
                     }
                 }
             }
