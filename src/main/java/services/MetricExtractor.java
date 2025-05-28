@@ -12,7 +12,7 @@ import net.sourceforge.pmd.PMDConfiguration;
 import net.sourceforge.pmd.lang.LanguageRegistry;
 import net.sourceforge.pmd.lang.java.JavaLanguageModule;
 import net.sourceforge.pmd.lang.java.ast.ASTMethodDeclaration;
-import net.sourcegitforge.pmd.lang.rule.RuleTargetSelector;
+
 
 import java.io.*;
 import java.nio.file.*;
@@ -24,7 +24,13 @@ import java.util.Map;
 import java.util.List;
 
 public class MetricExtractor {
+    private static final String JAVA_EXTENSION = ".java";
+
     public static void main(String[] args) throws Exception {
+        extractMetrics();
+    }
+
+    private static void extractMetrics() throws Exception {
         // Percorso della repo locale (modifica se necessario)
         File repoDir = new File("/Users/colaf/Documents/ISW2/bookkeeper/bookkeeper_ISW2/");
         Git git = Git.open(new File(repoDir, ".git"));
@@ -73,7 +79,7 @@ public class MetricExtractor {
 
             try (Stream<Path> paths = Files.walk(repoDir.toPath())) {
                 paths.filter(Files::isRegularFile)
-                     .filter(p -> p.toString().endsWith(".java"))
+                     .filter(p -> p.toString().endsWith(JAVA_EXTENSION))
                      .filter(p -> !p.toString().contains("/target/"))
                      .filter(p -> !p.toString().contains("/test/"))
                      .filter(p -> !p.toString().contains("/build/"))
@@ -133,7 +139,7 @@ public class MetricExtractor {
 
                                              for (org.eclipse.jgit.diff.DiffEntry diff : diffs) {
                                                  String modifiedPath = diff.getNewPath();
-                                                 if (!modifiedPath.endsWith(".java")) continue;
+                                                 if (!modifiedPath.endsWith(JAVA_EXTENSION)) continue;
 
                                                  String normalizedModified = modifiedPath.replace("\\", "/");
                                                  String currentNormalized = repoDir.toPath().relativize(path).toString().replace("\\", "/");
@@ -219,7 +225,7 @@ public class MetricExtractor {
             RuleSetLoader loader = RuleSetLoader.fromPmdConfig(config);
             pmd.addRuleSet(loader.loadFromResource("category/java/bestpractices.xml"));
 
-            Path tempFile = Files.createTempFile("method", ".java");
+            Path tempFile = Files.createTempFile("method", JAVA_EXTENSION);
             Files.writeString(tempFile, "public class TempClass { " + code + " }");
             pmd.files().addFile(tempFile);
 

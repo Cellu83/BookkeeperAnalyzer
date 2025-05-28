@@ -8,6 +8,10 @@ import java.util.*;
 
 public class BugCommitMatcher {
 
+    private BugCommitMatcher() {
+        // Utility class
+    }
+
     /**
      * Mappa ciascun ticket ID a una lista di commit che contengono l'ID nel messaggio del commit.
      *

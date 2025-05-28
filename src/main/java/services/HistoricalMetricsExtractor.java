@@ -25,7 +25,7 @@ public class HistoricalMetricsExtractor {
         }
     }
 
-    public HistoricalMetrics extract(String methodName, Path filePath, Date releaseDate, Git git) throws IOException, org.eclipse.jgit.api.errors.GitAPIException {
+    public HistoricalMetrics extract(Path filePath, Date releaseDate, Git git) throws IOException, org.eclipse.jgit.api.errors.GitAPIException {
         Repository repo = git.getRepository();
         String relativePath = repo.getWorkTree().toPath().relativize(filePath).toString().replace("\\", "/");
 

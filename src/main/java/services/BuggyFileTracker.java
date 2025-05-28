@@ -12,6 +12,10 @@ import java.util.stream.Collectors;
 
 public class BuggyFileTracker {
 
+    private BuggyFileTracker() {
+        // Utility class
+    }
+
     /**
      * Costruisce una mappa {filePath → lista di timestamp dei commit buggy}.
      * Utile per valutare se un file è buggy prima di una determinata release.
