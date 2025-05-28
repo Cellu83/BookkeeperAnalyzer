@@ -39,7 +39,8 @@ public class JiraTicketFetcher {
      */
     public static Map<String, String> fetchFixedBugTickets(String projectKey) throws IOException {
         Map<String, String> ticketMap = new HashMap<>();
-        int i = 0, total = 1;
+        int i = 0;
+        int total = 1;
         do {
             int j = i + 1000;
             String url = "https://issues.apache.org/jira/rest/api/2/search?jql=project=%22"

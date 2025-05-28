@@ -14,52 +14,51 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.logging.Logger;
 
-public class CheckoutReleases {
+public final class CheckoutReleases {
 
-    private static final Logger LOGGER = Logger.getLogger(CheckoutReleases.class.getName());
+    protected static final Logger LOGGER = Logger.getLogger(CheckoutReleases.class.getName());
 
     public static void main(String[] args) throws IOException, GitAPIException, ParseException {
         // Modifica con il tuo path corretto
         final String repoPath = "/Users/colaf/Documents/ISW2/bookkeeper/bookkeeper_ISW2/.git";
         String csvPath = "BOOKKEEPERVersionInfo.csv"; // Assicurati che sia nel path giusto
 
-        Git git = new Git(new FileRepositoryBuilder()
-                .setGitDir(new File(repoPath))
-                .readEnvironment()
-                .findGitDir()
-                .build());
+        FileRepositoryBuilder builder = new FileRepositoryBuilder();
+        Git git = new Git(builder.setGitDir(new File(repoPath))
+                                 .readEnvironment()
+                                 .findGitDir()
+                                 .build());
 
-        BufferedReader br = new BufferedReader(new FileReader(csvPath));
-        String line;
-        String header = br.readLine(); // salta intestazione
+        try (BufferedReader br = new BufferedReader(new FileReader(csvPath))) {
+            String line;
+            String header = br.readLine(); // salta intestazione
 
-        while ((line = br.readLine()) != null) {
-            String[] values = line.split(",");
-            String version = values[2];
-            String dateStr = values[3];
-            if (dateStr.contains("T")) {
-                dateStr = dateStr.split("T")[0];
+            while ((line = br.readLine()) != null) {
+                String[] values = line.split(",");
+                String version = values[2];
+                String dateStr = values[3];
+                if (dateStr.contains("T")) {
+                    dateStr = dateStr.split("T")[0];
+                }
+                Date releaseDate = new SimpleDateFormat("yyyy-MM-dd").parse(dateStr);
+
+                // Ripristina il branch 'master' prima di effettuare il checkout di ogni release
+                git.checkout().setName("master").call();
+
+                RevCommit bestCommit = getBestCommitBeforeDate(git, releaseDate);
+
+                if (bestCommit == null) {
+                    LOGGER.warning("No commit found before " + releaseDate + " for version: " + version);
+                    continue;
+                }
+
+                long daysDiff = (releaseDate.getTime() - bestCommit.getAuthorIdent().getWhen().getTime()) / (1000 * 60 * 60 * 24);
+                LOGGER.info(String.format("Checking out version: %s at commit: %s (commit date: %s, release date: %s, diff: %d days)",
+                        version, bestCommit.getName(), bestCommit.getAuthorIdent().getWhen(), releaseDate, daysDiff));
+                git.checkout().setName(bestCommit.getName()).call();
             }
-            Date releaseDate = new SimpleDateFormat("yyyy-MM-dd").parse(dateStr);
-
-            // Ripristina il branch 'master' prima di effettuare il checkout di ogni release
-            git.checkout().setName("master").call();
-
-            RevCommit bestCommit = getBestCommitBeforeDate(git, releaseDate);
-
-            if (bestCommit == null) {
-                LOGGER.warning("No commit found before " + releaseDate + " for version: " + version);
-                continue;
-            }
-
-            long daysDiff = (releaseDate.getTime() - bestCommit.getAuthorIdent().getWhen().getTime()) / (1000 * 60 * 60 * 24);
-            LOGGER.info(String.format("Checking out version: %s at commit: %s (commit date: %s, release date: %s, diff: %d days)",
-                    version, bestCommit.getName(), bestCommit.getAuthorIdent().getWhen(), releaseDate, daysDiff));
-            git.checkout().setName(bestCommit.getName()).call();
         }
-
         git.close();
-        br.close();
     }
 
     private static RevCommit getBestCommitBeforeDate(Git git, Date releaseDate) throws GitAPIException {

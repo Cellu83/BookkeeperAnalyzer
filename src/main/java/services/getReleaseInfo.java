@@ -60,12 +60,9 @@ public class getReleaseInfo {
 		         int cutoff = (int) Math.ceil(releases.size() * 0.33);
 		         ArrayList<LocalDateTime> datasetReleases = new ArrayList<>(releases.subList(0, cutoff));
 
-		         FileWriter fileWriter = null;
-			 try {
-		            fileWriter = null;
-		            String outname = projName + "VersionInfo.csv";
-						    //Name of CSV for output
-						    fileWriter = new FileWriter(outname);
+		         String outname = projName + "VersionInfo.csv";
+		         // Name of CSV for output
+		         try (FileWriter fileWriter = new FileWriter(outname)) {
 		            fileWriter.append("Index,Version ID,Version Name,Date");
 		            fileWriter.append("\n");
 		            numVersions = datasetReleases.size();
@@ -80,18 +77,9 @@ public class getReleaseInfo {
 		               fileWriter.append(datasetReleases.get(i).toString());
 		               fileWriter.append("\n");
 		            }
-
 		         } catch (Exception e) {
 		            LOGGER.severe("Error in csv writer");
 		            e.printStackTrace();
-		         } finally {
-		            try {
-		               fileWriter.flush();
-		               fileWriter.close();
-		            } catch (IOException e) {
-		               LOGGER.severe("Error while flushing/closing fileWriter !!!");
-		               e.printStackTrace();
-		            }
 		         }
 		         return;
 		   }
@@ -109,15 +97,11 @@ public class getReleaseInfo {
 
 
 	   public static JSONObject readJsonFromUrl(String url) throws IOException, JSONException {
-	      InputStream is = new URL(url).openStream();
-	      try {
-	         BufferedReader rd = new BufferedReader(new InputStreamReader(is, Charset.forName("UTF-8")));
+	      try (InputStream is = new URL(url).openStream();
+	           BufferedReader rd = new BufferedReader(new InputStreamReader(is, Charset.forName("UTF-8")))) {
 	         String jsonText = readAll(rd);
-	         JSONObject json = new JSONObject(jsonText);
-	         return json;
-	       } finally {
-	         is.close();
-	       }
+	         return new JSONObject(jsonText);
+	      }
 	   }
 
 	   private static String readAll(Reader rd) throws IOException {
