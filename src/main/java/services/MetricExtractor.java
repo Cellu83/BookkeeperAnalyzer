@@ -12,7 +12,7 @@ import net.sourceforge.pmd.PMDConfiguration;
 import net.sourceforge.pmd.lang.LanguageRegistry;
 import net.sourceforge.pmd.lang.java.JavaLanguageModule;
 import net.sourceforge.pmd.lang.java.ast.ASTMethodDeclaration;
-import net.sourceforge.pmd.lang.rule.RuleTargetSelector;
+import net.sourcegitforge.pmd.lang.rule.RuleTargetSelector;
 
 import java.io.*;
 import java.nio.file.*;
