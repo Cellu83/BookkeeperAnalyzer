@@ -165,8 +165,7 @@ public class MetricExtractor {
                                  }
 
                                  try {
-                                     HistoricalMetricsExtractor.HistoricalMetrics historical = historicalExtractor.extract(methodName, path, releaseDate, git);
-                                     int modifications = historical.modifications;
+                                     HistoricalMetricsExtractor.HistoricalMetrics historical = historicalExtractor.extract(path, releaseDate, git);                                     int modifications = historical.modifications;
                                      int authors = historical.authors.size();
                                     writer.println(
                                         methodName + "," + releaseId + "," + loc + "," + paramCount + "," + statements + "," +
@@ -225,12 +224,15 @@ public class MetricExtractor {
             RuleSetLoader loader = RuleSetLoader.fromPmdConfig(config);
             pmd.addRuleSet(loader.loadFromResource("category/java/bestpractices.xml"));
 
-            Path tempFile = Files.createTempFile("method", JAVA_EXTENSION);
+            Path tempDir = Files.createTempDirectory("pmd_tmp_");
+            tempDir.toFile().deleteOnExit();
+            Path tempFile = Files.createTempFile(tempDir, "method", JAVA_EXTENSION);
             Files.writeString(tempFile, "public class TempClass { " + code + " }");
             pmd.files().addFile(tempFile);
 
             var report = pmd.performAnalysisAndCollectReport();
             Files.deleteIfExists(tempFile);
+            Files.deleteIfExists(tempDir);
 
             int count = 0;
             for (var violation : report.getViolations()) {

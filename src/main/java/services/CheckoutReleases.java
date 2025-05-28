@@ -19,7 +19,8 @@ public class CheckoutReleases {
     private static final Logger LOGGER = Logger.getLogger(CheckoutReleases.class.getName());
 
     public static void main(String[] args) throws IOException, GitAPIException, ParseException {
-        String repoPath = "/Users/colaf/Documents/ISW2/bookkeeper/bookkeeper_ISW2/.git"; // Modifica con il tuo path corretto
+        // Modifica con il tuo path corretto
+        final String repoPath = "/Users/colaf/Documents/ISW2/bookkeeper/bookkeeper_ISW2/.git";
         String csvPath = "BOOKKEEPERVersionInfo.csv"; // Assicurati che sia nel path giusto
 
         Git git = new Git(new FileRepositoryBuilder()
@@ -39,25 +40,22 @@ public class CheckoutReleases {
             if (dateStr.contains("T")) {
                 dateStr = dateStr.split("T")[0];
             }
-            SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd");
-            Date releaseDate = formatter.parse(dateStr);
+            Date releaseDate = new SimpleDateFormat("yyyy-MM-dd").parse(dateStr);
 
-            // Reset HEAD alla branch completa prima di analizzare ogni release
+            // Ripristina il branch 'master' prima di effettuare il checkout di ogni release
             git.checkout().setName("master").call();
 
             RevCommit bestCommit = getBestCommitBeforeDate(git, releaseDate);
 
-            if (bestCommit != null) {
-                long daysDiff = (releaseDate.getTime() - bestCommit.getAuthorIdent().getWhen().getTime()) / (1000 * 60 * 60 * 24);
-                LOGGER.info("Checking out version: " + version +
-                        " at commit: " + bestCommit.getName() +
-                        " (commit date: " + bestCommit.getAuthorIdent().getWhen() +
-                        ", release date: " + releaseDate +
-                        ", diff: " + daysDiff + " days)");
-                git.checkout().setName(bestCommit.getName()).call();
-            } else {
+            if (bestCommit == null) {
                 LOGGER.warning("No commit found before " + releaseDate + " for version: " + version);
+                continue;
             }
+
+            long daysDiff = (releaseDate.getTime() - bestCommit.getAuthorIdent().getWhen().getTime()) / (1000 * 60 * 60 * 24);
+            LOGGER.info(String.format("Checking out version: %s at commit: %s (commit date: %s, release date: %s, diff: %d days)",
+                    version, bestCommit.getName(), bestCommit.getAuthorIdent().getWhen(), releaseDate, daysDiff));
+            git.checkout().setName(bestCommit.getName()).call();
         }
 
         git.close();
