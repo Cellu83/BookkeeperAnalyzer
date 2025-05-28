@@ -34,6 +34,6 @@ jobs:
           restore-keys: ${{ runner.os }}-m2
 
       - name: Build and analyze with Maven
-        run: mvn clean verify sonar:sonar -Dsonar.host.url=https://sonarcloud.io -Dsonar.organization=cellu83
+        run: mvn clean verify sonar:sonar -Dsonar.projectKey=Cellu83_BookkeeperAnalyzerClean
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
