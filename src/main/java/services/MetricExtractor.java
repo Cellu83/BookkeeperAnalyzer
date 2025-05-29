@@ -51,142 +51,153 @@ public class MetricExtractor {
             JavaParser parser = new JavaParser();
             HistoricalMetricsExtractor historicalExtractor = new HistoricalMetricsExtractor();
 
-            try (
-                BufferedReader versionReader = new BufferedReader(new FileReader("BOOKKEEPERVersionInfo.csv"));
-                PrintWriter writer = new PrintWriter(new FileWriter("metrics_dataset.csv", false))
-            ) {
-                writer.println("Method,ReleaseId,LOC,ParamCount,Statements,Cyclomatic,Nesting,Cognitive,Smells,Modifications,Authors,NameLength,TSLC,FanOut,Buggy,File");
-
-                String line = versionReader.readLine(); // skip header
-                while ((line = versionReader.readLine()) != null) {
-                    String[] tokens = line.split(",");
-                    if (tokens.length < 4) continue;
-                    String releaseId = tokens[2].trim();
-                    String dateStr = tokens[3].split("T")[0];
-                    Date releaseDate = sdf.parse(dateStr);
-
-                    git.checkout().setName("master").call();
-                    RevCommit bestCommit = null;
-                    for (RevCommit commit : git.log().call()) {
-                        Date commitDate = commit.getAuthorIdent().getWhen();
-                        if (commitDate.before(releaseDate) || commitDate.equals(releaseDate)) {
-                            if (bestCommit == null || commitDate.after(bestCommit.getAuthorIdent().getWhen())) {
-                                bestCommit = commit;
-                            }
-                        }
-                    }
-
-                    if (bestCommit == null) {
-                        LOGGER.warning("No commit found for release " + releaseId);
-                        continue;
-                    }
-
-                    git.checkout().setName(bestCommit.getName()).call();
-                    LOGGER.info("Checked out release " + releaseId + " at commit " + bestCommit.getName());
-
-                    try (Stream<Path> paths = Files.walk(repoDir.toPath())) {
-                        paths.filter(Files::isRegularFile)
-                             .filter(p -> p.toString().endsWith(JAVA_EXTENSION))
-                             .filter(p -> !p.toString().contains("/target/"))
-                             .filter(p -> !p.toString().contains("/test/"))
-                             .filter(p -> !p.toString().contains("/build/"))
-                             .forEach(path -> {
-                                 try {
-                                     CompilationUnit cu = parser.parse(path).getResult().orElse(null);
-                                     if (cu == null) return;
-                                     cu.findAll(MethodDeclaration.class).forEach(method -> {
-                                         String methodName = method.getNameAsString();
-                                         int paramCount = method.getParameters().size();
-                                         int loc = method.toString().split("\n").length;
-                                         // Statements count: approximate as number of semicolons in method body
-                                         int statements = method.getBody().isPresent() ? method.getBody().get().toString().split(";").length - 1 : 0;
-                                         int cyclomatic = countCyclomaticComplexity(method);
-                                         int nesting = countMaxNestingDepth(method);
-                                         int cognitive = cyclomatic + nesting;
-                                         int smells = countPMDSmells(method.toString());
-                                         int nameLength = methodName.length();
-                                         long tslc = 0;
-                                         try {
-                                             Iterable<RevCommit> commits = git.log().addPath(repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR)).call();
-                                             Date lastModification = null;
-                                             for (RevCommit c : commits) {
-                                                 Date commitDate = c.getAuthorIdent().getWhen();
-                                                 if (commitDate.before(releaseDate) || commitDate.equals(releaseDate)) {
-                                                     lastModification = commitDate;
-                                                     break; // il primo commit nella log è il più recente
-                                                 }
-                                             }
-                                             if (lastModification != null) {
-                                                 long diffMillis = releaseDate.getTime() - lastModification.getTime();
-                                                 tslc = diffMillis / (1000 * 60 * 60 * 24);
-                                             } else {
-                                                 tslc = -1;
-                                             }
-                                         } catch (Exception _) {
-                                             tslc = -1;
-                                         }
-                                         int fanOut = method.findAll(com.github.javaparser.ast.expr.MethodCallExpr.class).size();
-
-                                         String normalizedPath = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
-                                         boolean buggy = false;
-                                         try {
-                                             int methodStart = method.getBegin().get().line;
-                                             int methodEnd = method.getEnd().get().line;
-                                             for (RevCommit commit : ticketCommits.values().stream().flatMap(List::stream).toList()) {
-                                                 if (commit.getCommitTime() * 1000L > releaseDate.getTime()) continue;
-                                                 if (commit.getParentCount() == 0) continue;
-
-                                                 RevCommit parent = commit.getParent(0);
-                                                 try (org.eclipse.jgit.diff.DiffFormatter df = new org.eclipse.jgit.diff.DiffFormatter(org.eclipse.jgit.util.io.DisabledOutputStream.INSTANCE)) {
-                                                     df.setRepository(git.getRepository());
-                                                     df.setDetectRenames(true);
-                                                     java.util.List<org.eclipse.jgit.diff.DiffEntry> diffs = df.scan(parent.getTree(), commit.getTree());
-
-                                                     for (org.eclipse.jgit.diff.DiffEntry diff : diffs) {
-                                                         String modifiedPath = diff.getNewPath();
-                                                         if (!modifiedPath.endsWith(JAVA_EXTENSION)) continue;
-
-                                                         String normalizedModified = modifiedPath.replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
-                                                         String currentNormalized = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
-
-                                                         if (normalizedModified.equals(currentNormalized)) {
-                                                             List<org.eclipse.jgit.diff.Edit> edits = df.toFileHeader(diff).toEditList();
-                                                             boolean hasBuggyEdit = edits.stream().anyMatch(edit -> {
-                                                                 int editStart = edit.getBeginB();
-                                                                 int editEnd = edit.getEndB();
-                                                                 return editEnd >= methodStart && editStart <= methodEnd;
-                                                             });
-
-                                                             if (hasBuggyEdit) {
-                                                                 buggy = true;
-                                                                 break;
-                                                             }
-                                                         }
-                                                     }
-                                                 }
-                                                 if (buggy) break;
-                                             }
-                                         } catch (Exception e) {
-                                             buggy = false;
-                                         }
-
-                                         writeHistoricalMetrics(
-                                             historicalExtractor, path, releaseDate, git, methodName, releaseId,
-                                             loc, paramCount, statements, cyclomatic, nesting, cognitive, smells,
-                                             nameLength, tslc, fanOut, buggy, writer
-                                         );
-                                     });
-                                 } catch (Exception _) {
-                                     LOGGER.warning("Errore nel parsing: " + path);
-                                 }
-                             });
-                    }
-                }
+            try {
+                processReleases(repoDir, git, parser, historicalExtractor, ticketCommits);
             } catch (Exception e) {
-                throw new MetricExtractionException("Errore durante l'estrazione delle metriche", e);
+                throw new MetricExtractionException("Errore durante l'elaborazione delle release", e);
             }
         } catch (IOException e) {
             throw new MetricExtractionException("Errore durante l'apertura della repository Git", e);
+        }
+    }
+
+    private static void processReleases(File repoDir, Git git, JavaParser parser, HistoricalMetricsExtractor historicalExtractor, Map<String, List<RevCommit>> ticketCommits) throws Exception {
+        final String PATH_SEPARATOR_REGEX = "\\\\";
+        final String PATH_SEPARATOR = "/";
+        final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+        try (
+            BufferedReader versionReader = new BufferedReader(new FileReader("BOOKKEEPERVersionInfo.csv"));
+            PrintWriter writer = new PrintWriter(new FileWriter("metrics_dataset.csv", false))
+        ) {
+            writer.println("Method,ReleaseId,LOC,ParamCount,Statements,Cyclomatic,Nesting,Cognitive,Smells,Modifications,Authors,NameLength,TSLC,FanOut,Buggy,File");
+
+            String line = versionReader.readLine(); // skip header
+            while ((line = versionReader.readLine()) != null) {
+                String[] tokens = line.split(",");
+                if (tokens.length < 4) continue;
+                String releaseId = tokens[2].trim();
+                String dateStr = tokens[3].split("T")[0];
+                Date releaseDate = sdf.parse(dateStr);
+
+                git.checkout().setName("master").call();
+                RevCommit bestCommit = null;
+                for (RevCommit commit : git.log().call()) {
+                    Date commitDate = commit.getAuthorIdent().getWhen();
+                    if (commitDate.before(releaseDate) || commitDate.equals(releaseDate)) {
+                        if (bestCommit == null || commitDate.after(bestCommit.getAuthorIdent().getWhen())) {
+                            bestCommit = commit;
+                        }
+                    }
+                }
+
+                if (bestCommit == null) {
+                    LOGGER.warning("No commit found for release " + releaseId);
+                    continue;
+                }
+
+                git.checkout().setName(bestCommit.getName()).call();
+                LOGGER.info("Checked out release " + releaseId + " at commit " + bestCommit.getName());
+
+                try (Stream<Path> paths = Files.walk(repoDir.toPath())) {
+                    paths.filter(Files::isRegularFile)
+                         .filter(p -> p.toString().endsWith(JAVA_EXTENSION))
+                         .filter(p -> !p.toString().contains("/target/"))
+                         .filter(p -> !p.toString().contains("/test/"))
+                         .filter(p -> !p.toString().contains("/build/"))
+                         .forEach(path -> {
+                             try {
+                                 CompilationUnit cu = parser.parse(path).getResult().orElse(null);
+                                 if (cu == null) return;
+                                 cu.findAll(MethodDeclaration.class).forEach(method -> {
+                                     String methodName = method.getNameAsString();
+                                     int paramCount = method.getParameters().size();
+                                     int loc = method.toString().split("\n").length;
+                                     // Statements count: approximate as number of semicolons in method body
+                                     int statements = method.getBody().isPresent() ? method.getBody().get().toString().split(";").length - 1 : 0;
+                                     int cyclomatic = countCyclomaticComplexity(method);
+                                     int nesting = countMaxNestingDepth(method);
+                                     int cognitive = cyclomatic + nesting;
+                                     int smells = countPMDSmells(method.toString());
+                                     int nameLength = methodName.length();
+                                     long tslc = 0;
+                                     try {
+                                         Iterable<RevCommit> commits = git.log().addPath(repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR)).call();
+                                         Date lastModification = null;
+                                         for (RevCommit c : commits) {
+                                             Date commitDate = c.getAuthorIdent().getWhen();
+                                             if (commitDate.before(releaseDate) || commitDate.equals(releaseDate)) {
+                                                 lastModification = commitDate;
+                                                 break; // il primo commit nella log è il più recente
+                                             }
+                                         }
+                                         if (lastModification != null) {
+                                             long diffMillis = releaseDate.getTime() - lastModification.getTime();
+                                             tslc = diffMillis / (1000 * 60 * 60 * 24);
+                                         } else {
+                                             tslc = -1;
+                                         }
+                                     } catch (Exception _) {
+                                         tslc = -1;
+                                     }
+                                     int fanOut = method.findAll(com.github.javaparser.ast.expr.MethodCallExpr.class).size();
+
+                                     String normalizedPath = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
+                                     boolean buggy = false;
+                                     try {
+                                         int methodStart = method.getBegin().get().line;
+                                         int methodEnd = method.getEnd().get().line;
+                                         for (RevCommit commit : ticketCommits.values().stream().flatMap(List::stream).toList()) {
+                                             if (commit.getCommitTime() * 1000L > releaseDate.getTime()) continue;
+                                             if (commit.getParentCount() == 0) continue;
+
+                                             RevCommit parent = commit.getParent(0);
+                                             try (org.eclipse.jgit.diff.DiffFormatter df = new org.eclipse.jgit.diff.DiffFormatter(org.eclipse.jgit.util.io.DisabledOutputStream.INSTANCE)) {
+                                                 df.setRepository(git.getRepository());
+                                                 df.setDetectRenames(true);
+                                                 List<org.eclipse.jgit.diff.DiffEntry> diffs = df.scan(parent.getTree(), commit.getTree());
+
+                                                 for (org.eclipse.jgit.diff.DiffEntry diff : diffs) {
+                                                     String modifiedPath = diff.getNewPath();
+                                                     if (!modifiedPath.endsWith(JAVA_EXTENSION)) continue;
+
+                                                     String normalizedModified = modifiedPath.replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
+                                                     String currentNormalized = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
+
+                                                     if (normalizedModified.equals(currentNormalized)) {
+                                                         List<org.eclipse.jgit.diff.Edit> edits = df.toFileHeader(diff).toEditList();
+                                                         boolean hasBuggyEdit = edits.stream().anyMatch(edit -> {
+                                                             int editStart = edit.getBeginB();
+                                                             int editEnd = edit.getEndB();
+                                                             return editEnd >= methodStart && editStart <= methodEnd;
+                                                         });
+
+                                                         if (hasBuggyEdit) {
+                                                             buggy = true;
+                                                             break;
+                                                         }
+                                                     }
+                                                 }
+                                             }
+                                             if (buggy) break;
+                                         }
+                                     } catch (Exception e) {
+                                         buggy = false;
+                                     }
+
+                                     writeHistoricalMetrics(
+                                         historicalExtractor, path, releaseDate, git, methodName, releaseId,
+                                         loc, paramCount, statements, cyclomatic, nesting, cognitive, smells,
+                                         nameLength, tslc, fanOut, buggy, writer
+                                     );
+                                 });
+                             } catch (Exception _) {
+                                 LOGGER.warning("Errore nel parsing: " + path);
+                             }
+                         });
+                }
+            }
+        } catch (Exception e) {
+            throw new MetricExtractionException("Errore durante l'estrazione delle metriche", e);
         }
     }
 
