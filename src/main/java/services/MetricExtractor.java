@@ -34,6 +34,10 @@ public class MetricExtractor {
     }
 
     private static void extractMetrics() throws MetricExtractionException {
+        final String PATH_SEPARATOR_REGEX = "\\\\";
+        final String PATH_SEPARATOR = "/";
+        final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+
         // Percorso della repo locale (modifica se necessario)
         File repoDir = new File("/Users/colaf/Documents/ISW2/bookkeeper/bookkeeper_ISW2/");
         try (Git git = Git.open(new File(repoDir, ".git"))) {
@@ -45,22 +49,19 @@ public class MetricExtractor {
             JavaParser parser = new JavaParser();
             HistoricalMetricsExtractor historicalExtractor = new HistoricalMetricsExtractor();
 
-            File outputFile = new File("metrics_dataset.csv");
-            boolean fileExists = outputFile.exists();
-            PrintWriter writer = new PrintWriter(new FileWriter(outputFile, false));
+            try (
+                BufferedReader versionReader = new BufferedReader(new FileReader("BOOKKEEPERVersionInfo.csv"));
+                PrintWriter writer = new PrintWriter(new FileWriter("metrics_dataset.csv", false))
+            ) {
+                writer.println("Method,ReleaseId,LOC,ParamCount,Statements,Cyclomatic,Nesting,Cognitive,Smells,Modifications,Authors,NameLength,TSLC,FanOut,Buggy,File");
 
-            writer.println("Method,ReleaseId,LOC,ParamCount,Statements,Cyclomatic,Nesting,Cognitive,Smells,Modifications,Authors,NameLength,TSLC,FanOut,Buggy,File");
-
-            BufferedReader br = null;
-            try {
-                br = new BufferedReader(new FileReader("BOOKKEEPERVersionInfo.csv"));
-                String line = br.readLine(); // skip header
-                while ((line = br.readLine()) != null) {
+                String line = versionReader.readLine(); // skip header
+                while ((line = versionReader.readLine()) != null) {
                     String[] tokens = line.split(",");
                     if (tokens.length < 4) continue;
                     String releaseId = tokens[2].trim();
                     String dateStr = tokens[3].split("T")[0];
-                    Date releaseDate = new SimpleDateFormat("yyyy-MM-dd").parse(dateStr);
+                    Date releaseDate = sdf.parse(dateStr);
 
                     git.checkout().setName("master").call();
                     RevCommit bestCommit = null;
@@ -104,7 +105,7 @@ public class MetricExtractor {
                                          int nameLength = methodName.length();
                                          long tslc = 0;
                                          try {
-                                             String normalizedPath = repoDir.toPath().relativize(path).toString().replace("\\", "/");
+                                             String normalizedPath = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
                                              Iterable<RevCommit> commits = git.log().addPath(normalizedPath).call();
                                              Date lastModification = null;
                                              for (RevCommit c : commits) {
@@ -125,7 +126,7 @@ public class MetricExtractor {
                                          }
                                          int fanOut = method.findAll(com.github.javaparser.ast.expr.MethodCallExpr.class).size();
 
-                                         String normalizedPath = repoDir.toPath().relativize(path).toString().replace("\\", "/");
+                                         String normalizedPath = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
                                          boolean buggy = false;
                                          try {
                                              int methodStart = method.getBegin().get().line;
@@ -145,8 +146,8 @@ public class MetricExtractor {
                                                          String modifiedPath = diff.getNewPath();
                                                          if (!modifiedPath.endsWith(JAVA_EXTENSION)) continue;
 
-                                                         String normalizedModified = modifiedPath.replace("\\", "/");
-                                                         String currentNormalized = repoDir.toPath().relativize(path).toString().replace("\\", "/");
+                                                         String normalizedModified = modifiedPath.replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
+                                                         String currentNormalized = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
 
                                                          if (normalizedModified.equals(currentNormalized)) {
                                                              List<org.eclipse.jgit.diff.Edit> edits = df.toFileHeader(diff).toEditList();
@@ -169,13 +170,15 @@ public class MetricExtractor {
                                          }
 
                                          try {
-                                             HistoricalMetricsExtractor.HistoricalMetrics historical = historicalExtractor.extract(path, releaseDate, git);                                     int modifications = historical.getModifications();
+                                             HistoricalMetricsExtractor.HistoricalMetrics historical = historicalExtractor.extract(path, releaseDate, git);
+                                             int modifications = historical.getModifications();
                                              int authors = historical.getAuthors().size();
-                                            writer.println(
-                                                methodName + "," + releaseId + "," + loc + "," + paramCount + "," + statements + "," +
-                                                cyclomatic + "," + nesting + "," + cognitive + "," + smells + "," + modifications + "," +
-                                                authors + "," + nameLength + "," + tslc + "," + fanOut + "," + (buggy ? 1 : 0) + "," + path.toString()
-                                            );
+                                            writer.println(String.format(
+                                                "%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
+                                                methodName, releaseId, loc, paramCount, statements,
+                                                cyclomatic, nesting, cognitive, smells, modifications,
+                                                authors, nameLength, tslc, fanOut, buggy ? 1 : 0, path.toString()
+                                            ));
                                          } catch (IOException | org.eclipse.jgit.api.errors.GitAPIException e) {
                                              System.err.println("Errore nelle metriche storiche per " + methodName + ": " + e.getMessage());
                                          }
@@ -185,10 +188,7 @@ public class MetricExtractor {
                                  }
                              });
                     }
-                    writer.flush();
                 }
-                writer.close();
-                br.close();
             } catch (Exception e) {
                 throw new MetricExtractionException("Errore durante l'estrazione delle metriche", e);
             }
