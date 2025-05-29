@@ -38,13 +38,13 @@ public class MetricExtractor {
         final String PATH_SEPARATOR = "/";
         final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
 
-        // Percorso della repo locale (modifica se necessario)
-        File repoDir = new File("/Users/colaf/Documents/ISW2/bookkeeper/bookkeeper_ISW2/");
+        // Percorso della repo locale (ora configurabile tramite variabile d'ambiente REPO_DIR)
+        String repoPath = System.getenv().getOrDefault("REPO_DIR", "/Users/colaf/Documents/ISW2/bookkeeper/bookkeeper_ISW2/");
+        File repoDir = new File(repoPath);
         try (Git git = Git.open(new File(repoDir, ".git"))) {
 
             Map<String, String> bugTickets = JiraTicketFetcher.fetchFixedBugTickets("BOOKKEEPER");
             Map<String, List<RevCommit>> ticketCommits = BugCommitMatcher.mapTicketsToCommits(bugTickets, git);
-            Map<String, List<Long>> buggyFileHistory = BuggyFileTracker.collectBuggyFileHistory(ticketCommits, git);
 
             JavaParser parser = new JavaParser();
             HistoricalMetricsExtractor historicalExtractor = new HistoricalMetricsExtractor();
@@ -131,12 +131,12 @@ public class MetricExtractor {
                                          try {
                                              int methodStart = method.getBegin().get().line;
                                              int methodEnd = method.getEnd().get().line;
+                                             boolean foundBug = false;
                                              for (RevCommit commit : ticketCommits.values().stream().flatMap(List::stream).toList()) {
                                                  if (commit.getCommitTime() * 1000L > releaseDate.getTime()) continue;
-
                                                  if (commit.getParentCount() == 0) continue;
-                                                 RevCommit parent = commit.getParent(0);
 
+                                                 RevCommit parent = commit.getParent(0);
                                                  try (org.eclipse.jgit.diff.DiffFormatter df = new org.eclipse.jgit.diff.DiffFormatter(org.eclipse.jgit.util.io.DisabledOutputStream.INSTANCE)) {
                                                      df.setRepository(git.getRepository());
                                                      df.setDetectRenames(true);
@@ -156,32 +156,25 @@ public class MetricExtractor {
                                                                  int editEnd = edit.getEndB();
                                                                  if (editEnd >= methodStart && editStart <= methodEnd) {
                                                                      buggy = true;
+                                                                     foundBug = true;
                                                                      break;
                                                                  }
                                                              }
-                                                             if (buggy) break;
                                                          }
+                                                         if (foundBug) break;
                                                      }
                                                  }
-                                                 if (buggy) break;
+                                                 if (foundBug) break;
                                              }
                                          } catch (Exception e) {
                                              buggy = false;
                                          }
 
-                                         try {
-                                             HistoricalMetricsExtractor.HistoricalMetrics historical = historicalExtractor.extract(path, releaseDate, git);
-                                             int modifications = historical.getModifications();
-                                             int authors = historical.getAuthors().size();
-                                            writer.println(String.format(
-                                                "%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
-                                                methodName, releaseId, loc, paramCount, statements,
-                                                cyclomatic, nesting, cognitive, smells, modifications,
-                                                authors, nameLength, tslc, fanOut, buggy ? 1 : 0, path.toString()
-                                            ));
-                                         } catch (IOException | org.eclipse.jgit.api.errors.GitAPIException e) {
-                                             System.err.println("Errore nelle metriche storiche per " + methodName + ": " + e.getMessage());
-                                         }
+                                         writeHistoricalMetrics(
+                                             historicalExtractor, path, releaseDate, git, methodName, releaseId,
+                                             loc, paramCount, statements, cyclomatic, nesting, cognitive, smells,
+                                             nameLength, tslc, fanOut, buggy, writer
+                                         );
                                      });
                                  } catch (IOException e) {
                                      System.err.println("Errore nel parsing: " + path);
@@ -254,4 +247,40 @@ public class MetricExtractor {
             return 0;
         }
     }
+    private static void writeHistoricalMetrics(
+            HistoricalMetricsExtractor historicalExtractor,
+            Path path,
+            Date releaseDate,
+            Git git,
+            String methodName,
+            String releaseId,
+            int loc,
+            int paramCount,
+            int statements,
+            int cyclomatic,
+            int nesting,
+            int cognitive,
+            int smells,
+            int nameLength,
+            long tslc,
+            int fanOut,
+            boolean buggy,
+            PrintWriter writer
+    ) {
+        try {
+            HistoricalMetricsExtractor.HistoricalMetrics historical = historicalExtractor.extract(path, releaseDate, git);
+            int modifications = historical.getModifications();
+            int authors = historical.getAuthors().size();
+            writer.println(String.format(
+                    "%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
+                    methodName, releaseId, loc, paramCount, statements,
+                    cyclomatic, nesting, cognitive, smells, modifications,
+                    authors, nameLength, tslc, fanOut, buggy ? 1 : 0, path.toString()
+            ));
+        } catch (IOException | org.eclipse.jgit.api.errors.GitAPIException e) {
+            System.err.println("Errore nelle metriche storiche per " + methodName + ": " + e.getMessage());
+        }
+    }
 }
+
+
