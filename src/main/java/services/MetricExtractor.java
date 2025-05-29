@@ -1,4 +1,5 @@
 package services;
+import java.util.logging.Logger;
 
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
@@ -27,6 +28,7 @@ class MetricExtractionException extends Exception {
 }
 
 public class MetricExtractor {
+    private static final Logger LOGGER = Logger.getLogger(MetricExtractor.class.getName());
     private static final String JAVA_EXTENSION = ".java";
 
     public static void main(String[] args) throws Exception {
@@ -75,12 +77,12 @@ public class MetricExtractor {
                     }
 
                     if (bestCommit == null) {
-                        System.out.println("No commit found for release " + releaseId);
+                        LOGGER.warning("No commit found for release " + releaseId);
                         continue;
                     }
 
                     git.checkout().setName(bestCommit.getName()).call();
-                    System.out.println("Checked out release " + releaseId + " at commit " + bestCommit.getName());
+                    LOGGER.info("Checked out release " + releaseId + " at commit " + bestCommit.getName());
 
                     try (Stream<Path> paths = Files.walk(repoDir.toPath())) {
                         paths.filter(Files::isRegularFile)
@@ -105,8 +107,7 @@ public class MetricExtractor {
                                          int nameLength = methodName.length();
                                          long tslc = 0;
                                          try {
-                                             String normalizedPath = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
-                                             Iterable<RevCommit> commits = git.log().addPath(normalizedPath).call();
+                                             Iterable<RevCommit> commits = git.log().addPath(repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR)).call();
                                              Date lastModification = null;
                                              for (RevCommit c : commits) {
                                                  Date commitDate = c.getAuthorIdent().getWhen();
@@ -121,7 +122,7 @@ public class MetricExtractor {
                                              } else {
                                                  tslc = -1;
                                              }
-                                         } catch (Exception e) {
+                                         } catch (Exception _) {
                                              tslc = -1;
                                          }
                                          int fanOut = method.findAll(com.github.javaparser.ast.expr.MethodCallExpr.class).size();
@@ -131,7 +132,6 @@ public class MetricExtractor {
                                          try {
                                              int methodStart = method.getBegin().get().line;
                                              int methodEnd = method.getEnd().get().line;
-                                             boolean foundBug = false;
                                              for (RevCommit commit : ticketCommits.values().stream().flatMap(List::stream).toList()) {
                                                  if (commit.getCommitTime() * 1000L > releaseDate.getTime()) continue;
                                                  if (commit.getParentCount() == 0) continue;
@@ -151,20 +151,20 @@ public class MetricExtractor {
 
                                                          if (normalizedModified.equals(currentNormalized)) {
                                                              List<org.eclipse.jgit.diff.Edit> edits = df.toFileHeader(diff).toEditList();
-                                                             for (org.eclipse.jgit.diff.Edit edit : edits) {
+                                                             boolean hasBuggyEdit = edits.stream().anyMatch(edit -> {
                                                                  int editStart = edit.getBeginB();
                                                                  int editEnd = edit.getEndB();
-                                                                 if (editEnd >= methodStart && editStart <= methodEnd) {
-                                                                     buggy = true;
-                                                                     foundBug = true;
-                                                                     break;
-                                                                 }
+                                                                 return editEnd >= methodStart && editStart <= methodEnd;
+                                                             });
+
+                                                             if (hasBuggyEdit) {
+                                                                 buggy = true;
+                                                                 break;
                                                              }
                                                          }
-                                                         if (foundBug) break;
                                                      }
                                                  }
-                                                 if (foundBug) break;
+                                                 if (buggy) break;
                                              }
                                          } catch (Exception e) {
                                              buggy = false;
@@ -176,8 +176,8 @@ public class MetricExtractor {
                                              nameLength, tslc, fanOut, buggy, writer
                                          );
                                      });
-                                 } catch (IOException e) {
-                                     System.err.println("Errore nel parsing: " + path);
+                                 } catch (Exception _) {
+                                     LOGGER.warning("Errore nel parsing: " + path);
                                  }
                              });
                     }
@@ -237,13 +237,9 @@ public class MetricExtractor {
             Files.deleteIfExists(tempFile);
             Files.deleteIfExists(tempDir);
 
-            int count = 0;
-            for (var violation : report.getViolations()) {
-                count++;
-            }
-            return count;
+            return (int) report.getViolations().spliterator().getExactSizeIfKnown();
         } catch (Exception e) {
-            System.err.println("Errore nell'analisi PMD: " + e.getMessage());
+            LOGGER.severe("Errore nell'analisi PMD: " + e.getMessage());
             return 0;
         }
     }
@@ -278,7 +274,7 @@ public class MetricExtractor {
                     authors, nameLength, tslc, fanOut, buggy ? 1 : 0, path.toString()
             ));
         } catch (IOException | org.eclipse.jgit.api.errors.GitAPIException e) {
-            System.err.println("Errore nelle metriche storiche per " + methodName + ": " + e.getMessage());
+            LOGGER.warning("Errore nelle metriche storiche per " + methodName + ": " + e.getMessage());
         }
     }
 }
