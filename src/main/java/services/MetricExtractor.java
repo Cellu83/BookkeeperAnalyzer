@@ -38,7 +38,6 @@ public class MetricExtractor {
     private static void extractMetrics() throws MetricExtractionException {
         final String PATH_SEPARATOR_REGEX = "\\\\";
         final String PATH_SEPARATOR = "/";
-        final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
 
         // Percorso della repo locale (ora configurabile tramite variabile d'ambiente REPO_DIR)
         String repoPath = System.getenv().getOrDefault("REPO_DIR", "/Users/colaf/Documents/ISW2/bookkeeper/bookkeeper_ISW2/");
@@ -51,13 +50,11 @@ public class MetricExtractor {
             JavaParser parser = new JavaParser();
             HistoricalMetricsExtractor historicalExtractor = new HistoricalMetricsExtractor();
 
-            try {
-                processReleases(repoDir, git, parser, historicalExtractor, ticketCommits);
-            } catch (Exception e) {
-                throw new MetricExtractionException("Errore durante l'elaborazione delle release", e);
-            }
+            processReleases(repoDir, git, parser, historicalExtractor, ticketCommits);
         } catch (IOException e) {
             throw new MetricExtractionException("Errore durante l'apertura della repository Git", e);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -83,20 +80,20 @@ public class MetricExtractor {
                 RevCommit bestCommit = null;
                 for (RevCommit commit : git.log().call()) {
                     Date commitDate = commit.getAuthorIdent().getWhen();
-                    if (commitDate.before(releaseDate) || commitDate.equals(releaseDate)) {
-                        if (bestCommit == null || commitDate.after(bestCommit.getAuthorIdent().getWhen())) {
-                            bestCommit = commit;
-                        }
+                    if ((commitDate.before(releaseDate) || commitDate.equals(releaseDate)) &&
+                        (bestCommit == null || commitDate.after(bestCommit.getAuthorIdent().getWhen()))) {
+                        bestCommit = commit;
                     }
                 }
 
                 if (bestCommit == null) {
-                    LOGGER.warning("No commit found for release " + releaseId);
+                    LOGGER.warning(() -> String.format("No commit found for release %s", releaseId));
                     continue;
                 }
 
                 git.checkout().setName(bestCommit.getName()).call();
-                LOGGER.info("Checked out release " + releaseId + " at commit " + bestCommit.getName());
+                RevCommit finalBestCommit = bestCommit;
+                LOGGER.info(() -> String.format("Checked out release %s at commit %s", releaseId, finalBestCommit.getName()));
 
                 try (Stream<Path> paths = Files.walk(repoDir.toPath())) {
                     paths.filter(Files::isRegularFile)
@@ -141,44 +138,39 @@ public class MetricExtractor {
                                      }
                                      int fanOut = method.findAll(com.github.javaparser.ast.expr.MethodCallExpr.class).size();
 
-                                     String normalizedPath = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
                                      boolean buggy = false;
                                      try {
                                          int methodStart = method.getBegin().get().line;
                                          int methodEnd = method.getEnd().get().line;
+                                         boolean matchFound = false;
+                                         String currentNormalized = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
                                          for (RevCommit commit : ticketCommits.values().stream().flatMap(List::stream).toList()) {
-                                             if (commit.getCommitTime() * 1000L > releaseDate.getTime()) continue;
-                                             if (commit.getParentCount() == 0) continue;
-
+                                             if (commit.getCommitTime() * 1000L > releaseDate.getTime() || commit.getParentCount() == 0) continue;
                                              RevCommit parent = commit.getParent(0);
                                              try (org.eclipse.jgit.diff.DiffFormatter df = new org.eclipse.jgit.diff.DiffFormatter(org.eclipse.jgit.util.io.DisabledOutputStream.INSTANCE)) {
                                                  df.setRepository(git.getRepository());
                                                  df.setDetectRenames(true);
                                                  List<org.eclipse.jgit.diff.DiffEntry> diffs = df.scan(parent.getTree(), commit.getTree());
-
                                                  for (org.eclipse.jgit.diff.DiffEntry diff : diffs) {
                                                      String modifiedPath = diff.getNewPath();
-                                                     if (!modifiedPath.endsWith(JAVA_EXTENSION)) continue;
-
-                                                     String normalizedModified = modifiedPath.replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
-                                                     String currentNormalized = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
-
-                                                     if (normalizedModified.equals(currentNormalized)) {
-                                                         List<org.eclipse.jgit.diff.Edit> edits = df.toFileHeader(diff).toEditList();
-                                                         boolean hasBuggyEdit = edits.stream().anyMatch(edit -> {
-                                                             int editStart = edit.getBeginB();
-                                                             int editEnd = edit.getEndB();
-                                                             return editEnd >= methodStart && editStart <= methodEnd;
-                                                         });
-
-                                                         if (hasBuggyEdit) {
-                                                             buggy = true;
-                                                             break;
+                                                     if (modifiedPath.endsWith(JAVA_EXTENSION)) {
+                                                         String normalizedModified = modifiedPath.replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
+                                                         if (normalizedModified.equals(currentNormalized)) {
+                                                             List<org.eclipse.jgit.diff.Edit> edits = df.toFileHeader(diff).toEditList();
+                                                             if (edits.stream().anyMatch(edit -> {
+                                                                 int editStart = edit.getBeginB();
+                                                                 int editEnd = edit.getEndB();
+                                                                 return editEnd >= methodStart && editStart <= methodEnd;
+                                                             })) {
+                                                                 buggy = true;
+                                                                 matchFound = true;
+                                                                 break;
+                                                             }
                                                          }
                                                      }
                                                  }
                                              }
-                                             if (buggy) break;
+                                             if (matchFound) break;
                                          }
                                      } catch (Exception e) {
                                          buggy = false;
@@ -284,8 +276,8 @@ public class MetricExtractor {
                     cyclomatic, nesting, cognitive, smells, modifications,
                     authors, nameLength, tslc, fanOut, buggy ? 1 : 0, path.toString()
             ));
-        } catch (IOException | org.eclipse.jgit.api.errors.GitAPIException e) {
-            LOGGER.warning("Errore nelle metriche storiche per " + methodName + ": " + e.getMessage());
+        } catch (IOException | org.eclipse.jgit.api.errors.GitAPIException _) {
+            LOGGER.warning("Errore nelle metriche storiche per " + methodName);
         }
     }
 }

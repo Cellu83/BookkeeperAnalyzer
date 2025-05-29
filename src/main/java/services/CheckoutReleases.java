@@ -31,7 +31,7 @@ public final class CheckoutReleases {
 
         try (BufferedReader br = new BufferedReader(new FileReader(csvPath))) {
             String line;
-            br.readLine(); // skip header
+            String headerLine = br.readLine(); // skip header, useful for debugging
 
             while ((line = br.readLine()) != null) {
                 String[] values = line.split(",");
@@ -55,7 +55,7 @@ public final class CheckoutReleases {
                         (releaseDate.getTime() - bestCommit.getAuthorIdent().getWhen().getTime()) / (1000 * 60 * 60 * 24)));
                     continue;
                 }
-                LOGGER.warning("No commit found before " + releaseDate + " for version: " + version);
+                LOGGER.warning(() -> String.format("No commit found before %tF for version: %s", releaseDate, version));
             }
         }
         git.close();
