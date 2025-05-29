@@ -5,7 +5,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.*;
-import java.net.URL;
+import java.net.HttpURLConnection;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -22,7 +23,6 @@ public class ReleaseInfoFetcher {
     private static final Map<LocalDateTime, String> releaseNames = new HashMap<>();
     private static final Map<LocalDateTime, String> releaseID = new HashMap<>();
     private static final List<LocalDateTime> releases = new ArrayList<>();
-    private static int numVersions;
 
     private ReleaseInfoFetcher() {
         // Prevent instantiation
@@ -46,7 +46,6 @@ public class ReleaseInfoFetcher {
 
             int cutoff = (int) Math.ceil(releases.size() * 0.33);
             List<LocalDateTime> datasetReleases = new ArrayList<>(releases.subList(0, cutoff));
-            numVersions = datasetReleases.size();
 
             writeVersionInfoToCSV(datasetReleases);
 
@@ -65,7 +64,12 @@ public class ReleaseInfoFetcher {
     }
 
     private static JSONObject readJsonFromUrl(String urlString) throws IOException, JSONException {
-        try (InputStream is = new URL(urlString).openStream();
+        URI uri = URI.create(urlString);
+        HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
+        connection.setRequestMethod("GET");
+        connection.setRequestProperty("Accept", "application/json");
+
+        try (InputStream is = connection.getInputStream();
              BufferedReader rd = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
             StringBuilder sb = new StringBuilder();
             int cp;
@@ -73,6 +77,8 @@ public class ReleaseInfoFetcher {
                 sb.append((char) cp);
             }
             return new JSONObject(sb.toString());
+        } finally {
+            connection.disconnect();
         }
     }
 
@@ -81,7 +87,7 @@ public class ReleaseInfoFetcher {
             fileWriter.append("Index,Version ID,Version Name,Date\n");
             for (int i = 0; i < datasetReleases.size(); i++) {
                 LocalDateTime dateTime = datasetReleases.get(i);
-                fileWriter.append(String.format("%d,%s,%s,%s\n",
+                fileWriter.append(String.format("%d,%s,%s,%s%n",
                         i + 1,
                         releaseID.get(dateTime),
                         releaseNames.get(dateTime),

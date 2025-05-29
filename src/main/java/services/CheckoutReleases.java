@@ -31,7 +31,7 @@ public final class CheckoutReleases {
 
         try (BufferedReader br = new BufferedReader(new FileReader(csvPath))) {
             String line;
-            br.readLine(); // salta intestazione
+            String headerLine = br.readLine(); // salta intestazione, potrebbe essere utile per il debug o log
 
             while ((line = br.readLine()) != null) {
                 String[] values = line.split(",");
@@ -47,15 +47,19 @@ public final class CheckoutReleases {
 
                 RevCommit bestCommit = getBestCommitBeforeDate(git, releaseDate);
 
-                if (bestCommit != null) {
+                if (bestCommit != null && LOGGER.isLoggable(java.util.logging.Level.INFO)) {
                     long daysDiff = (releaseDate.getTime() - bestCommit.getAuthorIdent().getWhen().getTime()) / (1000 * 60 * 60 * 24);
-                    String message = String.format("Checking out version: %s at commit: %s (commit date: %s, release date: %s, diff: %d days)",
-                            version, bestCommit.getName(), bestCommit.getAuthorIdent().getWhen(), releaseDate, daysDiff);
-                    LOGGER.info(message);
+                    LOGGER.info(String.format(
+                        "Checking out version: %s at commit: %s (commit date: %tF, release date: %tF, diff: %d days)",
+                        version, bestCommit.getName(),
+                        bestCommit.getAuthorIdent().getWhen(), releaseDate,
+                        daysDiff));
+                    git.checkout().setName(bestCommit.getName()).call();
+                } else if (bestCommit != null) {
+                    // In case logging is not enabled, still checkout the commit
                     git.checkout().setName(bestCommit.getName()).call();
                 } else {
                     LOGGER.warning("No commit found before " + releaseDate + " for version: " + version);
-                    continue;
                 }
             }
         }
