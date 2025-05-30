@@ -71,7 +71,7 @@ public class ReleaseInfoFetcher {
             }
             releaseNames.put(dateTime, name);
             releaseIds.put(dateTime, id);
-        } catch (Exception e) {
+        } catch (Exception ignored) {
             LOGGER.warning("Invalid release date format: " + strDate);
         }
     }

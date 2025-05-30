@@ -43,11 +43,11 @@ public final class BuggyFileTracker {
                     for (DiffEntry diff : diffs) {
                         String path = diff.getNewPath();
                         if (!path.endsWith(".java")) continue;
-                        LOGGER.info("📄 File Java modificato (buggy): " + path);
+                        LOGGER.info(String.format("📄 File Java modificato (buggy): %s", path));
                         // Usa il timestamp del parent (release precedente al fix)
                         long buggyTimestamp = parent.getCommitTime() * 1000L;
                         buggyFileHistory.computeIfAbsent(path, k -> new ArrayList<>()).add(buggyTimestamp);
-                        LOGGER.info("⏰ Timestamp buggy aggiunto: " + buggyTimestamp + " per file " + path);
+                        LOGGER.info(String.format("⏰ Timestamp buggy aggiunto: %d per file %s", buggyTimestamp, path));
                     }
                 }
             }
@@ -56,7 +56,7 @@ public final class BuggyFileTracker {
         for (List<Long> tsList : buggyFileHistory.values()) {
             Collections.sort(tsList);
         }
-        LOGGER.info("✅ Buggy file history generata con " + buggyFileHistory.size() + " file.");
+        LOGGER.info(String.format("✅ Buggy file history generata con %d file.", buggyFileHistory.size()));
         return buggyFileHistory;
     }
 }

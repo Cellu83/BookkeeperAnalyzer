@@ -43,8 +43,8 @@ public class HistoricalMetricsExtractor {
         logDebugPaths(absoluteFile, repoRoot);
 
         if (!absoluteFile.startsWith(repoRoot)) {
-            LOGGER.warning("❌ Il file non è dentro la repo! File: " + absoluteFile);
-            LOGGER.warning("❌ Repo root: " + repoRoot);
+            LOGGER.warning(String.format("❌ Il file non è dentro la repo! File: %s", absoluteFile));
+            LOGGER.warning(String.format("❌ Repo root: %s", repoRoot));
             throw new IOException("File path is outside repository: " + filePath);
         }
 
@@ -66,14 +66,14 @@ public class HistoricalMetricsExtractor {
         }
 
         if (commits.isEmpty()) {
-            LOGGER.warning("⚠️ Nessun commit trovato per il file (filtro manuale): " + relativePath + " prima della data " + releaseDate);
+            LOGGER.warning(String.format("⚠️ Nessun commit trovato per il file (filtro manuale): %s prima della data %s", relativePath, releaseDate));
         }
 
         int modifications = 0;
         Set<String> uniqueAuthors = new HashSet<>();
 
         for (RevCommit commit : commits) {
-            LOGGER.info("✔ Commit: " + commit.getName() + " - autore: " + commit.getAuthorIdent().getName());
+            LOGGER.info(String.format("✔ Commit: %s - autore: %s", commit.getName(), commit.getAuthorIdent().getName()));
 
             RevCommit parent = null;
             if (commit.getParentCount() > 0) {
@@ -96,18 +96,18 @@ public class HistoricalMetricsExtractor {
             }
         }
 
-        LOGGER.info("Found " + commits.size() + " commits for " + relativePath);
+        LOGGER.info(String.format("Found %d commits for %s", commits.size(), relativePath));
         logSummary(relativePath, modifications, uniqueAuthors);
 
         return new HistoricalMetrics(modifications, uniqueAuthors);
     }
 
     private void logDebugPaths(Path absoluteFile, Path repoRoot) {
-        LOGGER.info("🔍 DEBUG - filePath: " + absoluteFile);
-        LOGGER.info("🔍 DEBUG - repoRoot: " + repoRoot);
+        LOGGER.info(String.format("🔍 DEBUG - filePath: %s", absoluteFile));
+        LOGGER.info(String.format("🔍 DEBUG - repoRoot: %s", repoRoot));
     }
 
     private void logSummary(String relativePath, int modificationCount, Set<String> authors) {
-        LOGGER.info("Modifications: " + modificationCount + ", Authors: " + authors.size() + " for " + relativePath);
+        LOGGER.info(String.format("Modifications: %d, Authors: %d for %s", modificationCount, authors.size(), relativePath));
     }
 }

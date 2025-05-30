@@ -69,7 +69,7 @@ public class JiraTicketFetcher {
         LOGGER.info("🎫 Ticket trovati: " + ticketMap.keySet());
         LOGGER.info("🧾 Ticket recuperati da JIRA:");
         for (Map.Entry<String, String> entry : ticketMap.entrySet()) {
-            LOGGER.info(" - Ticket: " + entry.getKey() + ", Risolto il: " + entry.getValue());
+            LOGGER.info(String.format(" - Ticket: %s, Risolto il: %s", entry.getKey(), entry.getValue()));
         }
         return ticketMap;
     }
