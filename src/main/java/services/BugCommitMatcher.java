@@ -1,15 +1,27 @@
 package services;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.revwalk.RevCommit;
 
 import java.io.IOException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
+/**
+ * Classe utility per associare i ticket di bug ai relativi commit.
+ */
 public class BugCommitMatcher {
 
+    private static final Logger LOGGER = Logger.getLogger(BugCommitMatcher.class.getName());
+    private static final int MAX_HEURISTIC_DATE_DIFF_DAYS = 2;
+    private static final String DATE_FORMAT_PATTERN = "yyyy-MM-dd";
+
     private BugCommitMatcher() {
-        // Utility class
+        // Costruttore privato per evitare l'istanziazione della classe utility
     }
 
     /**
@@ -18,57 +30,84 @@ public class BugCommitMatcher {
      * @param bugTickets mappa {ticketId → resolutionDate}
      * @param git istanza Git già inizializzata sul repo
      * @return mappa {ticketId → lista di commit che lo menzionano}
+     * @throws IOException in caso di errore durante l'accesso al repository
      */
     public static Map<String, List<RevCommit>> mapTicketsToCommits(Map<String, String> bugTickets, Git git) throws IOException {
-        Map<String, List<RevCommit>> result = new HashMap<>();
+        Map<String, List<RevCommit>> ticketToCommitsMap = new HashMap<>();
         Set<String> matchedTickets = new HashSet<>();
+
         try {
-            Iterable<RevCommit> commits = git.log().call();
-            for (RevCommit commit : commits) {
-                String message = commit.getFullMessage().toLowerCase();
-                for (Map.Entry<String, String> entry : bugTickets.entrySet()) {
-                    String ticket = entry.getKey();
-                    if (matchesTicket(message, ticket)) {
-                        result.computeIfAbsent(ticket, k -> new ArrayList<>()).add(commit);
-                        matchedTickets.add(ticket);
-                    } else {
-                        tryHeuristicMatch(result, matchedTickets, bugTickets, commit, ticket, entry);
-                    }
+            Iterable<RevCommit> commits = git.log().all().call();
+            processCommits(commits, bugTickets, ticketToCommitsMap, matchedTickets);
+        } catch (GitAPIException e) {
+            LOGGER.log(Level.SEVERE, "Errore durante la scansione dei commit", e);
+            throw new IOException("Errore durante la scansione dei commit", e);
+        }
+
+        return ticketToCommitsMap;
+    }
+
+    private static void processCommits(
+            Iterable<RevCommit> commits,
+            Map<String, String> bugTickets,
+            Map<String, List<RevCommit>> ticketToCommitsMap,
+            Set<String> matchedTickets) {
+
+        for (RevCommit commit : commits) {
+            String commitMessage = commit.getFullMessage().toLowerCase();
+
+            for (Map.Entry<String, String> entry : bugTickets.entrySet()) {
+                String ticketId = entry.getKey();
+                String resolutionDate = entry.getValue();
+
+                if (matchesTicket(commitMessage, ticketId)) {
+                    addCommitToTicket(ticketToCommitsMap, matchedTickets, ticketId, commit);
+                } else if (!matchedTickets.contains(ticketId) && isHeuristicMatch(commit, resolutionDate)) {
+                    addCommitToTicket(ticketToCommitsMap, matchedTickets, ticketId, commit);
                 }
             }
-        } catch (Exception e) {
-            throw new IOException("Errore durante la scansione dei commit: " + e.getMessage(), e);
         }
-        return result;
     }
 
-    private static boolean matchesTicket(String message, String ticket) {
-        String normalizedTicket = ticket.toLowerCase();
-        String altFormat = normalizedTicket.replace("-", "_");
-        return message.contains(normalizedTicket) || message.contains(altFormat);
+    private static void addCommitToTicket(
+            Map<String, List<RevCommit>> ticketToCommitsMap,
+            Set<String> matchedTickets,
+            String ticketId,
+            RevCommit commit) {
+
+        ticketToCommitsMap.computeIfAbsent(ticketId, k -> new ArrayList<>()).add(commit);
+        matchedTickets.add(ticketId);
     }
 
-    private static boolean tryHeuristicMatch(Map<String, List<RevCommit>> result, Set<String> matchedTickets, Map<String, String> bugTickets, RevCommit commit, String ticket, Map.Entry<String, String> entry) {
-        if (!matchedTickets.contains(ticket)) {
-            String ticketResolutionDate = entry.getValue();
-            if (ticketResolutionDate != null && isHeuristicMatch(commit, ticketResolutionDate)) {
-                result.computeIfAbsent(ticket, k -> new ArrayList<>()).add(commit);
-                matchedTickets.add(ticket);
-                return true;
-            }
-        }
-        return false;
+    private static boolean matchesTicket(String commitMessage, String ticketId) {
+        String normalizedTicketId = ticketId.toLowerCase();
+        String alternativeFormat = normalizedTicketId.replace("-", "_");
+        return commitMessage.contains(normalizedTicketId) || commitMessage.contains(alternativeFormat);
     }
 
     private static boolean isHeuristicMatch(RevCommit commit, String ticketResolutionDate) {
-        try {
-            Date commitDate = commit.getAuthorIdent().getWhen();
-            Date resolutionDate = new java.text.SimpleDateFormat("yyyy-MM-dd").parse(ticketResolutionDate);
-            long diffMillis = Math.abs(commitDate.getTime() - resolutionDate.getTime());
-            long diffDays = diffMillis / (1000 * 60 * 60 * 24);
-            return diffDays <= 2;
-        } catch (Exception ignored) {
+        if (ticketResolutionDate == null || ticketResolutionDate.isEmpty()) {
             return false;
         }
+
+        try {
+            Date commitDate = commit.getAuthorIdent().getWhen();
+            Date resolutionDate = parseDate(ticketResolutionDate);
+
+            long diffDays = calculateDayDifference(commitDate, resolutionDate);
+            return diffDays <= MAX_HEURISTIC_DATE_DIFF_DAYS;
+        } catch (ParseException e) {
+            LOGGER.log(Level.WARNING, "Impossibile analizzare la data: " + ticketResolutionDate, e);
+            return false;
+        }
+    }
+
+    private static Date parseDate(String dateString) throws ParseException {
+        return new SimpleDateFormat(DATE_FORMAT_PATTERN).parse(dateString);
+    }
+
+    private static long calculateDayDifference(Date date1, Date date2) {
+        long diffMillis = Math.abs(date1.getTime() - date2.getTime());
+        return diffMillis / (1000 * 60 * 60 * 24);
     }
 }
