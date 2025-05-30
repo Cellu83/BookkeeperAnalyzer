@@ -8,11 +8,8 @@ import org.eclipse.jgit.util.io.DisabledOutputStream;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.logging.Logger;
 
 public final class BuggyFileTracker {
-
-    private static final Logger LOGGER = Logger.getLogger(BuggyFileTracker.class.getName());
 
     private BuggyFileTracker() {
     }
@@ -28,7 +25,6 @@ public final class BuggyFileTracker {
      * @return mappa {filePath → lista di timestamp (millisecondi) in cui era buggy (release precedente al fix)}
      */
     public static Map<String, List<Long>> collectBuggyFileHistory(Map<String, List<RevCommit>> ticketCommits, Git git) throws IOException {
-        LOGGER.info("Inizio analisi commit buggy per costruzione mappa file → timestamp buggy.");
         Map<String, List<Long>> buggyFileHistory = new HashMap<>();
 
         for (Map.Entry<String, List<RevCommit>> entry : ticketCommits.entrySet()) {
@@ -43,11 +39,9 @@ public final class BuggyFileTracker {
                     for (DiffEntry diff : diffs) {
                         String path = diff.getNewPath();
                         if (!path.endsWith(".java")) continue;
-                        LOGGER.info(String.format("📄 File Java modificato (buggy): %s", path));
                         // Usa il timestamp del parent (release precedente al fix)
                         long buggyTimestamp = parent.getCommitTime() * 1000L;
                         buggyFileHistory.computeIfAbsent(path, k -> new ArrayList<>()).add(buggyTimestamp);
-                        LOGGER.info(String.format("⏰ Timestamp buggy aggiunto: %d per file %s", buggyTimestamp, path));
                     }
                 }
             }
@@ -56,7 +50,6 @@ public final class BuggyFileTracker {
         for (List<Long> tsList : buggyFileHistory.values()) {
             Collections.sort(tsList);
         }
-        LOGGER.info(String.format("✅ Buggy file history generata con %d file.", buggyFileHistory.size()));
         return buggyFileHistory;
     }
 }
