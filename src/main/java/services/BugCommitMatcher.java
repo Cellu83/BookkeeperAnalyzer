@@ -8,8 +8,8 @@ import java.io.IOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
-/** import java.util.logging.Level;*/
-import java.util.logging.Logger;
+/** import java.util.logging.Level;
+import java.util.logging.Logger; */
 
 /**
  * Classe utility per associare i ticket di bug ai relativi commit.
@@ -41,7 +41,7 @@ public class BugCommitMatcher {
             Iterable<RevCommit> commits = git.log().all().call();
             processCommits(commits, bugTickets, ticketToCommitsMap, matchedTickets);
         } catch (GitAPIException e) {
-            throw e; // Rilancio l'eccezione originale mantenendo il tipo specifico
+            throw new GitAPIException("Errore durante la lettura del log dei commit Git", e) {};
         }
 
         return ticketToCommitsMap;
