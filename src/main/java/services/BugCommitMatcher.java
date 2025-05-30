@@ -8,7 +8,7 @@ import java.io.IOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.logging.Level;
+/** import java.util.logging.Level;*/
 import java.util.logging.Logger;
 
 /**
@@ -16,7 +16,7 @@ import java.util.logging.Logger;
  */
 public class BugCommitMatcher {
 
-    private static final Logger LOGGER = Logger.getLogger(BugCommitMatcher.class.getName());
+    /**private static final Logger LOGGER = Logger.getLogger(BugCommitMatcher.class.getName()); */
     private static final int MAX_HEURISTIC_DATE_DIFF_DAYS = 2;
     private static final String DATE_FORMAT_PATTERN = "yyyy-MM-dd";
 
@@ -60,9 +60,10 @@ public class BugCommitMatcher {
                 String ticketId = entry.getKey();
                 String resolutionDate = entry.getValue();
 
-                if (matchesTicket(commitMessage, ticketId)) {
-                    addCommitToTicket(ticketToCommitsMap, matchedTickets, ticketId, commit);
-                } else if (!matchedTickets.contains(ticketId) && isHeuristicMatch(commit, resolutionDate)) {
+                boolean isDirectMatch = matchesTicket(commitMessage, ticketId);
+                boolean isHeuristicMatch = !matchedTickets.contains(ticketId) && isHeuristicMatch(commit, resolutionDate);
+
+                if (isDirectMatch || isHeuristicMatch) {
                     addCommitToTicket(ticketToCommitsMap, matchedTickets, ticketId, commit);
                 }
             }
@@ -96,7 +97,7 @@ public class BugCommitMatcher {
 
             long diffDays = calculateDayDifference(commitDate, resolutionDate);
             return diffDays <= MAX_HEURISTIC_DATE_DIFF_DAYS;
-        } catch (ParseException ignored) {
+        } catch (ParseException _) {
             return false;
         }
     }
