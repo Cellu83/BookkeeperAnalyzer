@@ -90,9 +90,7 @@ public class MetricExtractor {
         ) {
             writeMetricsHeader(writer);
 
-            // Skip header
-            String headerLine = versionReader.readLine(); // Skip header
-
+            // Leggi le versioni dal file CSV
             String line;
             while ((line = versionReader.readLine()) != null) {
                 String[] tokens = line.split(CSV_DELIMITER);
@@ -125,9 +123,9 @@ public class MetricExtractor {
     }
 
     private static void filterTicketCommitsByDate(Map<String, List<RevCommit>> ticketCommits, Date releaseDate) {
-        ticketCommits.forEach((ticket, commits) -> {
-            commits.removeIf(c -> c.getCommitTime() * 1000L > releaseDate.getTime());
-        });
+        ticketCommits.forEach((ticket, commits) ->
+            commits.removeIf(c -> c.getCommitTime() * 1000L > releaseDate.getTime()));
+
     }
 
     private static RevCommit findReleaseCommit(Git git, Date releaseDate) throws Exception {
@@ -204,11 +202,11 @@ public class MetricExtractor {
             CompilationUnit compilationUnit = parser.parse(path).getResult().orElse(null);
             if (compilationUnit == null) return;
 
-            compilationUnit.findAll(MethodDeclaration.class).forEach(method -> {
-                processMethod(method, path, context.git, context.releaseContext, context.historicalExtractor, context.writer);
-            });
+            compilationUnit.findAll(MethodDeclaration.class).forEach(method ->
+                processMethod(method, path, context.git, context.releaseContext, context.historicalExtractor, context.writer));
+
         } catch (Exception e) {
-            LOGGER.warning("Errore nel parsing: " + path);
+            LOGGER.warning("Errore nel parsing: " + path + " - " + e.getMessage());
         }
     }
 
@@ -341,8 +339,9 @@ private static int countStatements(MethodDeclaration method) {
             if (method.getBegin().isEmpty() || method.getEnd().isEmpty()) {
                 return false;
             }
-            int methodStart = method.getBegin().get().line;
-            int methodEnd = method.getEnd().get().line;
+            int methodStart = method.getBegin().map(pos -> pos.line).orElse(-1);
+            int methodEnd = method.getEnd().map(pos -> pos.line).orElse(-1);
+
             String currentNormalized = path.toString().replace("\\\\", "/");
 
             for (List<RevCommit> commits : ticketCommits.values()) {
@@ -407,10 +406,20 @@ private static boolean isMethodModifiedInFile(DiffFormatter df, DiffEntry diff, 
     private static class MethodMetrics {
         final String methodName;
         final String releaseId;
-        final int loc, paramCount, statements, cyclomatic, nesting, cognitive, smells, nameLength, fanOut;
+        final int loc;
+        final int paramCount;
+        final int statements;
+        final int cyclomatic;
+        final int nesting;
+        final int cognitive;
+        final int smells;
+        final int nameLength;
+        final int fanOut;
         final long tslc;
         final boolean buggy;
 
+
+        // Constructor for MethodMetrics, smella ma richiederebbe un altra classe.
         MethodMetrics(String methodName, String releaseId, int loc, int paramCount, int statements, int cyclomatic,
                       int nesting, int cognitive, int smells, int nameLength, long tslc, int fanOut, boolean buggy) {
             this.methodName = methodName;
