@@ -11,11 +11,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.logging.Logger;
 
 public class ReleaseInfoFetcher {
 
-    private static final Logger LOGGER = Logger.getLogger(ReleaseInfoFetcher.class.getName());
     private static final String API_URL = "https://issues.apache.org/jira/rest/api/2/project/";
 
     private static final Map<LocalDateTime, String> releaseNames = new HashMap<>();
@@ -55,7 +53,6 @@ public class ReleaseInfoFetcher {
             writeVersionInfoToCSV(datasetReleases, outputFileName);
 
         } catch (IOException | JSONException e) {
-            LOGGER.severe("Error during processing: " + e.getMessage());
         }
     }
 
@@ -72,7 +69,6 @@ public class ReleaseInfoFetcher {
             releaseNames.put(dateTime, name);
             releaseIds.put(dateTime, id);
         } catch (Exception ignored) {
-            LOGGER.warning("Invalid release date format: " + strDate);
         }
     }
 
@@ -102,7 +98,6 @@ public class ReleaseInfoFetcher {
                 fileWriter.append(formatReleaseAsCSVLine(i, datasetReleases.get(i)));
             }
         } catch (IOException e) {
-            LOGGER.severe("Error writing CSV: " + e.getMessage());
         }
     }
 

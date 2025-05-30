@@ -8,11 +8,8 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.logging.Logger;
 
 public class JiraTicketFetcher {
-
-    private static final Logger LOGGER = Logger.getLogger(JiraTicketFetcher.class.getName());
 
     private JiraTicketFetcher() {
         // Utility class
@@ -66,11 +63,6 @@ public class JiraTicketFetcher {
                 ticketMap.put(key, resolutionDate);
             }
         } while (startAt < total);
-        LOGGER.info("🎫 Ticket trovati: " + ticketMap.keySet());
-        LOGGER.info("🧾 Ticket recuperati da JIRA:");
-        for (Map.Entry<String, String> entry : ticketMap.entrySet()) {
-            LOGGER.info(String.format(" - Ticket: %s, Risolto il: %s", entry.getKey(), entry.getValue()));
-        }
         return ticketMap;
     }
 }
