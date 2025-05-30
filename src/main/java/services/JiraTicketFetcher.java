@@ -8,8 +8,11 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.Logger;
 
 public class JiraTicketFetcher {
+
+    private static final Logger LOGGER = Logger.getLogger(JiraTicketFetcher.class.getName());
 
     private JiraTicketFetcher() {
         // Utility class
@@ -32,19 +35,22 @@ public class JiraTicketFetcher {
         }
     }
 
+    private static String buildJiraQueryUrl(String projectKey, int startAt, int maxResults) {
+        return "https://issues.apache.org/jira/rest/api/2/search?jql=project=%22"
+                + projectKey + "%22%20AND%20issuetype=%22Bug%22%20AND%20(status=%22closed%22%20OR%20status=%22resolved%22)%20AND%20resolution=%22fixed%22"
+                + "&fields=key,resolutiondate&startAt=" + startAt + "&maxResults=" + maxResults;
+    }
+
     /**
      * Recupera tutti i ticket di tipo "Bug" chiusi e fissati per il progetto specificato,
      * restituendo una mappa {ticket ID -> resolutionDate}.
      */
     public static Map<String, String> fetchFixedBugTickets(String projectKey) throws IOException {
         Map<String, String> ticketMap = new HashMap<>();
-        int i = 0;
-        int total = 1;
+        int startAt = 0;
+        int total;
         do {
-            int j = i + 1000;
-            String url = "https://issues.apache.org/jira/rest/api/2/search?jql=project=%22"
-                    + projectKey + "%22%20AND%20issuetype=%22Bug%22%20AND%20(status=%22closed%22%20OR%20status=%22resolved%22)%20AND%20resolution=%22fixed%22"
-                    + "&fields=key,resolutiondate&startAt=" + i + "&maxResults=" + (j - i);
+            String url = buildJiraQueryUrl(projectKey, startAt, 1000);
             JSONObject json;
             try {
                 json = readJsonFromUrl(url);
@@ -53,13 +59,18 @@ public class JiraTicketFetcher {
             }
             JSONArray issues = json.getJSONArray("issues");
             total = json.getInt("total");
-            for (int idx = 0; idx < issues.length() && i < total; idx++, i++) {
+            for (int idx = 0; idx < issues.length() && startAt < total; idx++, startAt++) {
                 JSONObject issue = issues.getJSONObject(idx);
                 String key = issue.getString("key");
                 String resolutionDate = issue.getJSONObject("fields").optString("resolutiondate", "");
                 ticketMap.put(key, resolutionDate);
             }
-        } while (i < total);
+        } while (startAt < total);
+        LOGGER.info("🎫 Ticket trovati: " + ticketMap.keySet());
+        LOGGER.info("🧾 Ticket recuperati da JIRA:");
+        for (Map.Entry<String, String> entry : ticketMap.entrySet()) {
+            LOGGER.info(" - Ticket: " + entry.getKey() + ", Risolto il: " + entry.getValue());
+        }
         return ticketMap;
     }
 }

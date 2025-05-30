@@ -1,0 +1,11 @@
+Method,ReleaseId,LOC,ParamCount,Statements,Cyclomatic,Nesting,Cognitive,Smells,Modifications,Authors,NameLength,TSLC,FanOut,Buggy,File
+getName,3.0.0,4,0,0,1,2,3,2,3,1,7,-1,0,0,/Users/colaf/Documents/ISW2/zookeeper/zookeeper/src/java/jmx/org/apache/zookeeper/jmx/ZKMBeanInfo.java
+isHidden,3.0.0,6,0,0,1,1,2,2,3,1,8,-1,0,0,/Users/colaf/Documents/ISW2/zookeeper/zookeeper/src/java/jmx/org/apache/zookeeper/jmx/ZKMBeanInfo.java
+getInstance,3.0.0,3,0,1,1,4,5,2,4,2,11,-1,0,0,/Users/colaf/Documents/ISW2/zookeeper/zookeeper/src/java/jmx/org/apache/zookeeper/jmx/MBeanRegistry.java
+register,3.0.0,27,2,13,4,10,14,10,4,2,8,-1,12,0,/Users/colaf/Documents/ISW2/zookeeper/zookeeper/src/java/jmx/org/apache/zookeeper/jmx/MBeanRegistry.java
+unregister,3.0.0,18,2,5,4,12,16,10,4,2,10,-1,7,0,/Users/colaf/Documents/ISW2/zookeeper/zookeeper/src/java/jmx/org/apache/zookeeper/jmx/MBeanRegistry.java
+unregister,3.0.0,12,1,5,2,7,9,5,4,2,10,-1,5,0,/Users/colaf/Documents/ISW2/zookeeper/zookeeper/src/java/jmx/org/apache/zookeeper/jmx/MBeanRegistry.java
+unregisterAll,3.0.0,10,0,3,2,8,10,3,4,2,13,-1,6,0,/Users/colaf/Documents/ISW2/zookeeper/zookeeper/src/java/jmx/org/apache/zookeeper/jmx/MBeanRegistry.java
+makeFullPath,3.0.0,20,2,7,6,11,17,12,4,2,12,-1,4,0,/Users/colaf/Documents/ISW2/zookeeper/zookeeper/src/java/jmx/org/apache/zookeeper/jmx/MBeanRegistry.java
+makeFullPath,3.0.0,3,2,1,2,7,9,4,4,2,12,-1,2,0,/Users/colaf/Documents/ISW2/zookeeper/zookeeper/src/java/jmx/org/apache/zookeeper/jmx/MBeanRegistry.java
+tokenize,3.0.0,13,3,4,3,11,14,10,4,2,8,-

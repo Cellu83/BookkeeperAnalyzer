@@ -16,13 +16,11 @@ import java.util.logging.Logger;
 public class ReleaseInfoFetcher {
 
     private static final Logger LOGGER = Logger.getLogger(ReleaseInfoFetcher.class.getName());
-    private static final String PROJECT_NAME = "BOOKKEEPER";
     private static final String API_URL = "https://issues.apache.org/jira/rest/api/2/project/";
-    private static final String OUTPUT_FILENAME = PROJECT_NAME + "VersionInfo.csv";
 
     private static final Map<LocalDateTime, String> releaseNames = new HashMap<>();
-    private static final Map<LocalDateTime, String> releaseID = new HashMap<>();
-    private static final List<LocalDateTime> releases = new ArrayList<>();
+    private static final Map<LocalDateTime, String> releaseIds = new HashMap<>();
+    private static final List<LocalDateTime> releaseDates = new ArrayList<>();
 
     private ReleaseInfoFetcher() {
         // Prevent instantiation
@@ -30,37 +28,52 @@ public class ReleaseInfoFetcher {
 
     public static void main(String[] args) {
         try {
-            JSONObject json = readJsonFromUrl(API_URL + PROJECT_NAME);
-            JSONArray versions = json.getJSONArray("versions");
+            String projectName = getProjectName();
+            String outputFileName = projectName.toUpperCase() + "VersionInfo.csv";
 
-            for (int i = 0; i < versions.length(); i++) {
-                JSONObject version = versions.getJSONObject(i);
-                if (version.has("releaseDate")) {
-                    String name = version.optString("name", "");
-                    String id = version.optString("id", "");
-                    addRelease(version.getString("releaseDate"), name, id);
+            JSONObject json = readJsonFromUrl(API_URL + projectName);
+            JSONArray versions = json.optJSONArray("versions");
+            if (versions != null) {
+                for (int i = 0; i < versions.length(); i++) {
+                    JSONObject version = versions.optJSONObject(i);
+                    if (version != null) {
+                        String releaseDate = version.optString("releaseDate", null);
+                        if (releaseDate != null && !releaseDate.isEmpty()) {
+                            String name = version.optString("name", "");
+                            String id = version.optString("id", "");
+                            storeReleaseInfo(releaseDate, name, id);
+                        }
+                    }
                 }
             }
 
-            releases.sort(LocalDateTime::compareTo);
+            releaseDates.sort(LocalDateTime::compareTo);
 
-            int cutoff = (int) Math.ceil(releases.size() * 0.33);
-            List<LocalDateTime> datasetReleases = new ArrayList<>(releases.subList(0, cutoff));
+            int cutoff = (int) Math.ceil(releaseDates.size() * 0.33);
+            List<LocalDateTime> datasetReleases = new ArrayList<>(releaseDates.subList(0, cutoff));
 
-            writeVersionInfoToCSV(datasetReleases);
+            writeVersionInfoToCSV(datasetReleases, outputFileName);
 
         } catch (IOException | JSONException e) {
             LOGGER.severe("Error during processing: " + e.getMessage());
         }
     }
 
-    private static void addRelease(String strDate, String name, String id) {
-        LocalDateTime dateTime = LocalDate.parse(strDate).atStartOfDay();
-        if (!releases.contains(dateTime)) {
-            releases.add(dateTime);
+    private static String getProjectName() {
+        return System.getenv().getOrDefault("PROJECT_NAME", "ZOOKEEPER");
+    }
+
+    private static void storeReleaseInfo(String strDate, String name, String id) {
+        try {
+            LocalDateTime dateTime = LocalDate.parse(strDate).atStartOfDay();
+            if (!releaseDates.contains(dateTime)) {
+                releaseDates.add(dateTime);
+            }
+            releaseNames.put(dateTime, name);
+            releaseIds.put(dateTime, id);
+        } catch (Exception e) {
+            LOGGER.warning("Invalid release date format: " + strDate);
         }
-        releaseNames.put(dateTime, name);
-        releaseID.put(dateTime, id);
     }
 
     private static JSONObject readJsonFromUrl(String urlString) throws IOException, JSONException {
@@ -82,19 +95,22 @@ public class ReleaseInfoFetcher {
         }
     }
 
-    private static void writeVersionInfoToCSV(List<LocalDateTime> datasetReleases) {
-        try (FileWriter fileWriter = new FileWriter(OUTPUT_FILENAME)) {
+    private static void writeVersionInfoToCSV(List<LocalDateTime> datasetReleases, String outputFileName) {
+        try (FileWriter fileWriter = new FileWriter(outputFileName)) {
             fileWriter.append("Index,Version ID,Version Name,Date\n");
             for (int i = 0; i < datasetReleases.size(); i++) {
-                LocalDateTime dateTime = datasetReleases.get(i);
-                fileWriter.append(String.format("%d,%s,%s,%s%n",
-                        i + 1,
-                        releaseID.get(dateTime),
-                        releaseNames.get(dateTime),
-                        dateTime.toString()));
+                fileWriter.append(formatReleaseAsCSVLine(i, datasetReleases.get(i)));
             }
         } catch (IOException e) {
             LOGGER.severe("Error writing CSV: " + e.getMessage());
         }
+    }
+
+    private static String formatReleaseAsCSVLine(int index, LocalDateTime dateTime) {
+        return String.format("%d,%s,%s,%s%n",
+            index + 1,
+            releaseIds.get(dateTime),
+            releaseNames.get(dateTime),
+            dateTime);
     }
 }

@@ -21,12 +21,18 @@ import java.util.stream.Stream;
 import java.util.Map;
 import java.util.List;
 
+
 class MetricExtractionException extends Exception {
     public MetricExtractionException(String message, Throwable cause) {
+
         super(message, cause);
     }
 }
 
+/**
+ * Classe responsabile per l'estrazione di metriche statiche e storiche dai metodi Java
+ * all'interno di una repository Git, in base alle release specificate e ai commit legati a bug fix.
+ */
 public class MetricExtractor {
     private static final Logger LOGGER = Logger.getLogger(MetricExtractor.class.getName());
     private static final String JAVA_EXTENSION = ".java";
@@ -35,22 +41,18 @@ public class MetricExtractor {
         extractMetrics();
     }
 
+    @SuppressWarnings("DuplicatedCode")
     private static void extractMetrics() throws MetricExtractionException {
-        final String PATH_SEPARATOR_REGEX = "\\\\";
-        final String PATH_SEPARATOR = "/";
-
-        // Percorso della repo locale (ora configurabile tramite variabile d'ambiente REPO_DIR)
-        String repoPath = System.getenv().getOrDefault("REPO_DIR", "/Users/colaf/Documents/ISW2/bookkeeper/bookkeeper_ISW2/");
-        File repoDir = new File(repoPath);
+        File repoDir = getRepoDirectory();
+        String projectName = System.getenv().getOrDefault("PROJECT_NAME", "zookeeper");
         try (Git git = Git.open(new File(repoDir, ".git"))) {
-
-            Map<String, String> bugTickets = JiraTicketFetcher.fetchFixedBugTickets("BOOKKEEPER");
+            Map<String, String> bugTickets = JiraTicketFetcher.fetchFixedBugTickets(projectName.toUpperCase());
             Map<String, List<RevCommit>> ticketCommits = BugCommitMatcher.mapTicketsToCommits(bugTickets, git);
 
             JavaParser parser = new JavaParser();
             HistoricalMetricsExtractor historicalExtractor = new HistoricalMetricsExtractor();
 
-            processReleases(repoDir, git, parser, historicalExtractor, ticketCommits);
+            processReleases(projectName, repoDir, git, parser, historicalExtractor, ticketCommits);
         } catch (IOException e) {
             throw new MetricExtractionException("Errore durante l'apertura della repository Git", e);
         } catch (Exception e) {
@@ -58,13 +60,12 @@ public class MetricExtractor {
         }
     }
 
-    private static void processReleases(File repoDir, Git git, JavaParser parser, HistoricalMetricsExtractor historicalExtractor, Map<String, List<RevCommit>> ticketCommits) throws Exception {
-        final String PATH_SEPARATOR_REGEX = "\\\\";
-        final String PATH_SEPARATOR = "/";
+    @SuppressWarnings("DuplicatedCode")
+    private static void processReleases(String projectName, File repoDir, Git git, JavaParser parser, HistoricalMetricsExtractor historicalExtractor, Map<String, List<RevCommit>> ticketCommits) throws Exception {
         final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
         try (
-            BufferedReader versionReader = new BufferedReader(new FileReader("BOOKKEEPERVersionInfo.csv"));
-            PrintWriter writer = new PrintWriter(new FileWriter("metrics_dataset.csv", false))
+            BufferedReader versionReader = new BufferedReader(new FileReader(projectName.toUpperCase() + "VersionInfo.csv"));
+            PrintWriter writer = new PrintWriter(new FileWriter("metrics_" + projectName.toLowerCase() + ".csv", false))
         ) {
             writer.println("Method,ReleaseId,LOC,ParamCount,Statements,Cyclomatic,Nesting,Cognitive,Smells,Modifications,Authors,NameLength,TSLC,FanOut,Buggy,File");
 
@@ -75,6 +76,16 @@ public class MetricExtractor {
                 String releaseId = tokens[2].trim();
                 String dateStr = tokens[3].split("T")[0];
                 Date releaseDate = sdf.parse(dateStr);
+                LOGGER.info("📌 Inizio analisi release " + releaseId + " del " + dateStr);
+                LOGGER.info("📊 Ticket associati a commit in questa esecuzione: " + ticketCommits.size());
+                ticketCommits.forEach((ticket, commits) -> {
+                    List<RevCommit> validCommits = commits.stream()
+                        .filter(c -> c.getCommitTime() * 1000L <= releaseDate.getTime())
+                        .toList();
+                    if (!validCommits.isEmpty()) {
+                        LOGGER.info("🧾 Ticket " + ticket + ": " + validCommits.size() + " commit validi per la release " + releaseId);
+                    }
+                });
 
                 git.checkout().setName("master").call();
                 RevCommit bestCommit = null;
@@ -103,9 +114,9 @@ public class MetricExtractor {
                          .filter(p -> !p.toString().contains("/build/"))
                          .forEach(path -> {
                              try {
-                                 CompilationUnit cu = parser.parse(path).getResult().orElse(null);
-                                 if (cu == null) return;
-                                 cu.findAll(MethodDeclaration.class).forEach(method -> {
+                                 CompilationUnit compilationUnit = parser.parse(path).getResult().orElse(null);
+                                 if (compilationUnit == null) return;
+                                 compilationUnit.findAll(MethodDeclaration.class).forEach(method -> {
                                      String methodName = method.getNameAsString();
                                      int paramCount = method.getParameters().size();
                                      int loc = method.toString().split("\n").length;
@@ -116,26 +127,7 @@ public class MetricExtractor {
                                      int cognitive = cyclomatic + nesting;
                                      int smells = countPMDSmells(method.toString());
                                      int nameLength = methodName.length();
-                                     long tslc = 0;
-                                     try {
-                                         Iterable<RevCommit> commits = git.log().addPath(repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR)).call();
-                                         Date lastModification = null;
-                                         for (RevCommit c : commits) {
-                                             Date commitDate = c.getAuthorIdent().getWhen();
-                                             if (commitDate.before(releaseDate) || commitDate.equals(releaseDate)) {
-                                                 lastModification = commitDate;
-                                                 break; // il primo commit nella log è il più recente
-                                             }
-                                         }
-                                         if (lastModification != null) {
-                                             long diffMillis = releaseDate.getTime() - lastModification.getTime();
-                                             tslc = diffMillis / (1000 * 60 * 60 * 24);
-                                         } else {
-                                             tslc = -1;
-                                         }
-                                     } catch (Exception _) {
-                                         tslc = -1;
-                                     }
+                                     long tslc = calculateTSLC(path, releaseDate, git);
                                      int fanOut = method.findAll(com.github.javaparser.ast.expr.MethodCallExpr.class).size();
 
                                      boolean buggy = false;
@@ -143,7 +135,9 @@ public class MetricExtractor {
                                          int methodStart = method.getBegin().get().line;
                                          int methodEnd = method.getEnd().get().line;
                                          boolean matchFound = false;
-                                         String currentNormalized = repoDir.toPath().relativize(path).toString().replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
+                                         String currentNormalized = repoDir.toPath().relativize(path).toString().replace("\\\\", "/");
+                                         // Log numero di commit associati a ticket
+                                         LOGGER.info("🔄 Numero di commit associati a ticket: " + ticketCommits.values().stream().flatMap(List::stream).count());
                                          for (RevCommit commit : ticketCommits.values().stream().flatMap(List::stream).toList()) {
                                              if (commit.getCommitTime() * 1000L > releaseDate.getTime() || commit.getParentCount() == 0) continue;
                                              RevCommit parent = commit.getParent(0);
@@ -154,9 +148,15 @@ public class MetricExtractor {
                                                  for (org.eclipse.jgit.diff.DiffEntry diff : diffs) {
                                                      String modifiedPath = diff.getNewPath();
                                                      if (modifiedPath.endsWith(JAVA_EXTENSION)) {
-                                                         String normalizedModified = modifiedPath.replace(PATH_SEPARATOR_REGEX, PATH_SEPARATOR);
+                                                         String normalizedModified = modifiedPath.replace("\\\\", "/");
+                                                         LOGGER.info("🔍 Confronto path: modified=" + normalizedModified + ", current=" + currentNormalized);
                                                          if (normalizedModified.equals(currentNormalized)) {
+                                                             LOGGER.info("✅ Match path con file modificato: " + normalizedModified);
                                                              List<org.eclipse.jgit.diff.Edit> edits = df.toFileHeader(diff).toEditList();
+                                                             for (org.eclipse.jgit.diff.Edit edit : edits) {
+                                                                 LOGGER.info("✏️ Edit lines: " + edit.getBeginB() + " - " + edit.getEndB());
+                                                             }
+                                                             LOGGER.info("📌 Metodo: " + methodName + " (linee: " + methodStart + " - " + methodEnd + ")");
                                                              if (edits.stream().anyMatch(edit -> {
                                                                  int editStart = edit.getBeginB();
                                                                  int editEnd = edit.getEndB();
@@ -171,6 +171,11 @@ public class MetricExtractor {
                                                  }
                                              }
                                              if (matchFound) break;
+                                         }
+                                         if (buggy) {
+                                             LOGGER.info("🐞 Metodo buggy rilevato: " + methodName + " nel file " + path);
+                                         } else {
+                                             LOGGER.info("✅ Metodo non buggy: " + methodName + " nel file " + path);
                                          }
                                      } catch (Exception e) {
                                          buggy = false;
@@ -191,6 +196,31 @@ public class MetricExtractor {
         } catch (Exception e) {
             throw new MetricExtractionException("Errore durante l'estrazione delle metriche", e);
         }
+    }
+
+    private static File getRepoDirectory() {
+        String projectName = System.getenv().getOrDefault("PROJECT_NAME", "zookeeper");
+        String basePath = System.getenv().getOrDefault("REPO_BASE", "/Users/colaf/Documents/ISW2/");
+        String repoPath = basePath + projectName + "/" + projectName + "/";
+        return new File(repoPath);
+    }
+
+    private static long calculateTSLC(Path path, Date releaseDate, Git git) {
+        try {
+            Iterable<RevCommit> commits = git.log()
+                .addPath(path.toString().replace("\\\\", "/"))
+                .call();
+            for (RevCommit c : commits) {
+                Date commitDate = c.getAuthorIdent().getWhen();
+                if (!commitDate.after(releaseDate)) {
+                    long diffMillis = releaseDate.getTime() - commitDate.getTime();
+                    return diffMillis / (1000 * 60 * 60 * 24);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warning("Errore nel calcolo del TSLC per " + path + ": " + e.getMessage());
+        }
+        return -1;
     }
 
     private static int countCyclomaticComplexity(MethodDeclaration method) {
@@ -229,6 +259,11 @@ public class MetricExtractor {
         try (PmdAnalysis pmd = PmdAnalysis.create(config)) {
             RuleSetLoader loader = RuleSetLoader.fromPmdConfig(config);
             pmd.addRuleSet(loader.loadFromResource("category/java/bestpractices.xml"));
+            pmd.addRuleSet(loader.loadFromResource("category/java/errorprone.xml"));
+            pmd.addRuleSet(loader.loadFromResource("category/java/codestyle.xml"));
+            pmd.addRuleSet(loader.loadFromResource("category/java/design.xml"));
+
+            LOGGER.info("📄 Codice analizzato da PMD:\n" + code);
 
             Path tempDir = Files.createTempDirectory("pmd_tmp_");
             tempDir.toFile().deleteOnExit();
@@ -237,6 +272,8 @@ public class MetricExtractor {
             pmd.files().addFile(tempFile);
 
             var report = pmd.performAnalysisAndCollectReport();
+            // Log PMD violations count
+            LOGGER.info("🔍 PMD trovato " + report.getViolations().spliterator().getExactSizeIfKnown() + " smells");
             Files.deleteIfExists(tempFile);
             Files.deleteIfExists(tempDir);
 
@@ -283,3 +320,8 @@ public class MetricExtractor {
 }
 
 
+
+    // --- PATCH: Estendi la finestra di confronto commit/ticket a ±2 giorni ---
+    // Se hai una classe TicketCommitLinker con associateByHeuristics, modifica la condizione temporale così:
+    // long diff = Math.abs(commitDate.getTime() - ticketDate.getTime());
+    // if (diff <= TimeUnit.DAYS.toMillis(2)) { ... }
