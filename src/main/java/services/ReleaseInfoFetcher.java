@@ -40,7 +40,7 @@ public class ReleaseInfoFetcher {
             fetchReleaseData(projectName);
 
             if (releaseDates.isEmpty()) {
-                LOGGER.warning("Nessuna versione trovata con date di rilascio valide");
+                // LOGGER.warning("Nessuna versione trovata con date di rilascio valide");
                 return;
             }
 
@@ -50,10 +50,10 @@ public class ReleaseInfoFetcher {
             List<LocalDateTime> datasetReleases = new ArrayList<>(releaseDates.subList(0, cutoff));
 
             writeVersionInfoToCSV(datasetReleases, outputFileName);
-            LOGGER.info("Informazioni sulle versioni salvate in " + outputFileName);
+            // LOGGER.info("Informazioni sulle versioni salvate in " + outputFileName);
 
         } catch (IOException | JSONException e) {
-            LOGGER.log(Level.SEVERE, "Errore durante il recupero o la scrittura delle informazioni sulla versione", e);
+            // LOGGER.log(Level.SEVERE, "Errore durante il recupero o la scrittura delle informazioni sulla versione", e);
         }
     }
 
@@ -65,7 +65,7 @@ public class ReleaseInfoFetcher {
         JSONObject json = readJsonFromUrl(API_URL + projectName);
         JSONArray versions = json.optJSONArray("versions");
         if (versions == null) {
-            LOGGER.warning("Nessuna informazione sulle versioni trovata per " + projectName);
+            // LOGGER.warning("Nessuna informazione sulle versioni trovata per " + projectName);
             return;
         }
 
@@ -75,14 +75,13 @@ public class ReleaseInfoFetcher {
     private static void processVersions(JSONArray versions) {
         for (int i = 0; i < versions.length(); i++) {
             JSONObject version = versions.optJSONObject(i);
-            if (version == null) continue;
+            String releaseDate = version != null ? version.optString("releaseDate", null) : null;
 
-            String releaseDate = version.optString("releaseDate", null);
-            if (releaseDate == null || releaseDate.isEmpty()) continue;
-
-            String name = version.optString("name", "");
-            String id = version.optString("id", "");
-            storeReleaseInfo(releaseDate, name, id);
+            if (version != null && releaseDate != null && !releaseDate.isEmpty()) {
+                String name = version.optString("name", "");
+                String id = version.optString("id", "");
+                storeReleaseInfo(releaseDate, name, id);
+            }
         }
     }
 
@@ -95,7 +94,7 @@ public class ReleaseInfoFetcher {
             releaseNames.put(dateTime, name);
             releaseIds.put(dateTime, id);
         } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Impossibile analizzare la data di rilascio: " + strDate, e);
+            // LOGGER.log(Level.WARNING, "Impossibile analizzare la data di rilascio: " + strDate, e);
         }
     }
 
@@ -138,7 +137,7 @@ public class ReleaseInfoFetcher {
                 fileWriter.append(formatReleaseAsCSVLine(i, datasetReleases.get(i)));
             }
         } catch (IOException e) {
-            LOGGER.log(Level.SEVERE, "Errore durante la scrittura nel file CSV: " + outputFileName, e);
+            // LOGGER.log(Level.SEVERE, "Errore durante la scrittura nel file CSV: " + outputFileName, e);
             throw e;
         }
     }

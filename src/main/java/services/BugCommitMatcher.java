@@ -31,8 +31,9 @@ public class BugCommitMatcher {
      * @param git istanza Git già inizializzata sul repo
      * @return mappa {ticketId → lista di commit che lo menzionano}
      * @throws IOException in caso di errore durante l'accesso al repository
+     * @throws GitAPIException in caso di errore durante le operazioni Git
      */
-    public static Map<String, List<RevCommit>> mapTicketsToCommits(Map<String, String> bugTickets, Git git) throws IOException {
+    public static Map<String, List<RevCommit>> mapTicketsToCommits(Map<String, String> bugTickets, Git git) throws IOException, GitAPIException {
         Map<String, List<RevCommit>> ticketToCommitsMap = new HashMap<>();
         Set<String> matchedTickets = new HashSet<>();
 
@@ -40,8 +41,7 @@ public class BugCommitMatcher {
             Iterable<RevCommit> commits = git.log().all().call();
             processCommits(commits, bugTickets, ticketToCommitsMap, matchedTickets);
         } catch (GitAPIException e) {
-            LOGGER.log(Level.SEVERE, "Errore durante la scansione dei commit", e);
-            throw new IOException("Errore durante la scansione dei commit", e);
+            throw e; // Rilancio l'eccezione originale mantenendo il tipo specifico
         }
 
         return ticketToCommitsMap;
@@ -96,8 +96,7 @@ public class BugCommitMatcher {
 
             long diffDays = calculateDayDifference(commitDate, resolutionDate);
             return diffDays <= MAX_HEURISTIC_DATE_DIFF_DAYS;
-        } catch (ParseException e) {
-            LOGGER.log(Level.WARNING, "Impossibile analizzare la data: " + ticketResolutionDate, e);
+        } catch (ParseException ignored) {
             return false;
         }
     }

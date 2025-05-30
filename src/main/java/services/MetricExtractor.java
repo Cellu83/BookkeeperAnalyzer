@@ -45,6 +45,7 @@ public class MetricExtractor {
     private static final String ENV_PROJECT_NAME = "PROJECT_NAME";
     private static final String ENV_REPO_BASE = "REPO_BASE";
     private static final String DEFAULT_REPO_BASE = "/Users/colaf/Documents/ISW2/";
+    private static final String REPO_SUBFOLDER_FORMAT = "%s/%s/";
 
     private static final Logger LOGGER = Logger.getLogger(MetricExtractor.class.getName());
 
@@ -90,28 +91,28 @@ public class MetricExtractor {
             writeMetricsHeader(writer);
 
             // Skip header
-            versionReader.readLine();
+            String headerLine = versionReader.readLine(); // Skip header
 
             String line;
             while ((line = versionReader.readLine()) != null) {
                 String[] tokens = line.split(CSV_DELIMITER);
-                if (tokens.length < 4) continue;
+                if (tokens.length >= 4) {
+                    String releaseId = tokens[2].trim();
+                    String dateStr = tokens[3].split("T")[0];
+                    Date releaseDate = sdf.parse(dateStr);
 
-                String releaseId = tokens[2].trim();
-                String dateStr = tokens[3].split("T")[0];
-                Date releaseDate = sdf.parse(dateStr);
+                    filterTicketCommitsByDate(ticketCommits, releaseDate);
 
-                filterTicketCommitsByDate(ticketCommits, releaseDate);
-
-                RevCommit releaseCommit = findReleaseCommit(git, releaseDate);
-                if (releaseCommit == null) {
-                    LOGGER.warning(() -> String.format("No commit found for release %s", releaseId));
-                    continue;
+                    RevCommit releaseCommit = findReleaseCommit(git, releaseDate);
+                    if (releaseCommit != null) {
+                        checkoutCommit(git, releaseCommit);
+                        processJavaFiles(repoDir, parser, git,
+                                new ReleaseContext(releaseDate, releaseId, ticketCommits),
+                                historicalExtractor, writer);
+                    } else {
+                        LOGGER.warning(() -> String.format("No commit found for release %s", releaseId));
+                    }
                 }
-
-                checkoutCommit(git, releaseCommit);
-
-                processJavaFiles(repoDir, parser, git, releaseDate, releaseId, historicalExtractor, ticketCommits, writer);
             }
         } catch (Exception e) {
             throw new MetricExtractionException("Errore durante l'estrazione delle metriche", e);
@@ -125,9 +126,7 @@ public class MetricExtractor {
 
     private static void filterTicketCommitsByDate(Map<String, List<RevCommit>> ticketCommits, Date releaseDate) {
         ticketCommits.forEach((ticket, commits) -> {
-            List<RevCommit> validCommits = commits.stream()
-                    .filter(c -> c.getCommitTime() * 1000L <= releaseDate.getTime())
-                    .toList();
+            commits.removeIf(c -> c.getCommitTime() * 1000L > releaseDate.getTime());
         });
     }
 
@@ -151,44 +150,62 @@ public class MetricExtractor {
         LOGGER.info(() -> String.format("Checked out commit %s", commit.getName()));
     }
 
+    private static class ReleaseContext {
+        final Date releaseDate;
+        final String releaseId;
+        final Map<String, List<RevCommit>> ticketCommits;
+
+        ReleaseContext(Date releaseDate, String releaseId, Map<String, List<RevCommit>> ticketCommits) {
+            this.releaseDate = releaseDate;
+            this.releaseId = releaseId;
+            this.ticketCommits = ticketCommits;
+        }
+    }
+
     private static void processJavaFiles(
             File repoDir,
             JavaParser parser,
             Git git,
-            Date releaseDate,
-            String releaseId,
+            ReleaseContext context,
             HistoricalMetricsExtractor historicalExtractor,
-            Map<String, List<RevCommit>> ticketCommits,
             PrintWriter writer
     ) throws IOException {
+        JavaProcessingContext processingContext = new JavaProcessingContext(git, context, historicalExtractor, writer);
         try (Stream<Path> paths = Files.walk(repoDir.toPath())) {
             paths.filter(Files::isRegularFile)
                     .filter(p -> p.toString().endsWith(JAVA_EXTENSION))
                     .filter(p -> !p.toString().contains("/target/"))
                     .filter(p -> !p.toString().contains("/test/"))
                     .filter(p -> !p.toString().contains("/build/"))
-                    .forEach(path -> processJavaFile(path, parser, git, releaseDate, releaseId, historicalExtractor,
-                            ticketCommits, writer));
+                    .forEach(path -> processJavaFile(path, parser, processingContext));
+        }
+    }
+
+    private static class JavaProcessingContext {
+        final Git git;
+        final ReleaseContext releaseContext;
+        final HistoricalMetricsExtractor historicalExtractor;
+        final PrintWriter writer;
+
+        JavaProcessingContext(Git git, ReleaseContext releaseContext, HistoricalMetricsExtractor historicalExtractor, PrintWriter writer) {
+            this.git = git;
+            this.releaseContext = releaseContext;
+            this.historicalExtractor = historicalExtractor;
+            this.writer = writer;
         }
     }
 
     private static void processJavaFile(
             Path path,
             JavaParser parser,
-            Git git,
-            Date releaseDate,
-            String releaseId,
-            HistoricalMetricsExtractor historicalExtractor,
-            Map<String, List<RevCommit>> ticketCommits,
-            PrintWriter writer
+            JavaProcessingContext context
     ) {
         try {
             CompilationUnit compilationUnit = parser.parse(path).getResult().orElse(null);
             if (compilationUnit == null) return;
 
             compilationUnit.findAll(MethodDeclaration.class).forEach(method -> {
-                processMethod(method, path, git, releaseDate, releaseId, historicalExtractor,
-                        ticketCommits, writer);
+                processMethod(method, path, context.git, context.releaseContext, context.historicalExtractor, context.writer);
             });
         } catch (Exception e) {
             LOGGER.warning("Errore nel parsing: " + path);
@@ -199,10 +216,8 @@ public class MetricExtractor {
             MethodDeclaration method,
             Path path,
             Git git,
-            Date releaseDate,
-            String releaseId,
+            ReleaseContext context,
             HistoricalMetricsExtractor historicalExtractor,
-            Map<String, List<RevCommit>> ticketCommits,
             PrintWriter writer
     ) {
         String methodName = method.getNameAsString();
@@ -214,26 +229,28 @@ public class MetricExtractor {
         int cognitive = cyclomatic + nesting;
         int smells = countPMDSmells(method.toString());
         int nameLength = methodName.length();
-        long tslc = calculateTSLC(path, releaseDate, git);
+        long tslc = calculateTSLC(path, context.releaseDate, git);
         int fanOut = method.findAll(MethodCallExpr.class).size();
 
-        boolean buggy = isBuggy(method, path, releaseDate, git, ticketCommits);
+        boolean buggy = isBuggy(method, path, context.releaseDate, git, context.ticketCommits);
 
-        writeMethodMetrics(
-                historicalExtractor, path, releaseDate, git, methodName, releaseId,
-                loc, paramCount, statements, cyclomatic, nesting, cognitive, smells,
-                nameLength, tslc, fanOut, buggy, writer
+        MethodMetrics metrics = new MethodMetrics(
+                methodName, context.releaseId, loc, paramCount, statements,
+                cyclomatic, nesting, cognitive, smells, nameLength, tslc, fanOut, buggy
         );
+        writeMethodMetrics(historicalExtractor, path, context.releaseDate, git, metrics, writer);
     }
 
-    private static int countStatements(MethodDeclaration method) {
-        return method.getBody().isPresent() ? method.getBody().get().toString().split(";").length - 1 : 0;
-    }
+private static int countStatements(MethodDeclaration method) {
+    return method.getBody()
+            .map(body -> body.toString().split(";").length - 1)
+            .orElse(0);
+}
 
     private static File getRepoDirectory() {
         String projectName = System.getenv().getOrDefault(ENV_PROJECT_NAME, DEFAULT_PROJECT);
         String basePath = System.getenv().getOrDefault(ENV_REPO_BASE, DEFAULT_REPO_BASE);
-        String repoPath = basePath + projectName + "/" + projectName + "/";
+        String repoPath = basePath + String.format(REPO_SUBFOLDER_FORMAT, projectName, projectName);
         return new File(repoPath);
     }
 
@@ -321,6 +338,9 @@ public class MetricExtractor {
             Map<String, List<RevCommit>> ticketCommits
     ) {
         try {
+            if (method.getBegin().isEmpty() || method.getEnd().isEmpty()) {
+                return false;
+            }
             int methodStart = method.getBegin().get().line;
             int methodEnd = method.getEnd().get().line;
             String currentNormalized = path.toString().replace("\\\\", "/");
@@ -342,42 +362,71 @@ public class MetricExtractor {
         return false;
     }
 
-    private static boolean isMethodModifiedInCommit(
-            RevCommit commit,
-            Git git,
-            String currentFilePath,
-            int methodStart,
-            int methodEnd
-    ) throws Exception {
-        RevCommit parent = commit.getParent(0);
+private static boolean isMethodModifiedInCommit(
+        RevCommit commit,
+        Git git,
+        String currentFilePath,
+        int methodStart,
+        int methodEnd
+) throws Exception {
+    RevCommit parent = commit.getParent(0);
+    try (DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
+        df.setRepository(git.getRepository());
+        df.setDetectRenames(true);
+        List<DiffEntry> diffs = df.scan(parent.getTree(), commit.getTree());
+        for (DiffEntry diff : diffs) {
+            if (isMethodModifiedInFile(df, diff, currentFilePath, methodStart, methodEnd)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
-        try (DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
-            df.setRepository(git.getRepository());
-            df.setDetectRenames(true);
-            List<DiffEntry> diffs = df.scan(parent.getTree(), commit.getTree());
+private static boolean isMethodModifiedInFile(DiffFormatter df, DiffEntry diff, String currentFilePath, int methodStart, int methodEnd) throws IOException {
+    String modifiedPath = diff.getNewPath();
+    if (modifiedPath.endsWith(JAVA_EXTENSION)) {
+        String normalizedModified = modifiedPath.replace("\\\\", "/");
 
-            for (DiffEntry diff : diffs) {
-                String modifiedPath = diff.getNewPath();
-                if (modifiedPath.endsWith(JAVA_EXTENSION)) {
-                    String normalizedModified = modifiedPath.replace("\\\\", "/");
+        if (normalizedModified.equals(currentFilePath)) {
+            List<Edit> edits = df.toFileHeader(diff).toEditList();
 
-                    if (normalizedModified.equals(currentFilePath)) {
-                        List<Edit> edits = df.toFileHeader(diff).toEditList();
+            for (Edit edit : edits) {
+                int editStart = edit.getBeginB();
+                int editEnd = edit.getEndB();
 
-                        for (Edit edit : edits) {
-                            int editStart = edit.getBeginB();
-                            int editEnd = edit.getEndB();
-
-                            if (editEnd >= methodStart && editStart <= methodEnd) {
-                                return true;
-                            }
-                        }
-                    }
+                if (editEnd >= methodStart && editStart <= methodEnd) {
+                    return true;
                 }
             }
         }
+    }
+    return false;
+}
 
-        return false;
+    private static class MethodMetrics {
+        final String methodName;
+        final String releaseId;
+        final int loc, paramCount, statements, cyclomatic, nesting, cognitive, smells, nameLength, fanOut;
+        final long tslc;
+        final boolean buggy;
+
+        MethodMetrics(String methodName, String releaseId, int loc, int paramCount, int statements, int cyclomatic,
+                      int nesting, int cognitive, int smells, int nameLength, long tslc, int fanOut, boolean buggy) {
+            this.methodName = methodName;
+            this.releaseId = releaseId;
+            this.loc = loc;
+            this.paramCount = paramCount;
+            this.statements = statements;
+            this.cyclomatic = cyclomatic;
+            this.nesting = nesting;
+            this.cognitive = cognitive;
+            this.smells = smells;
+            this.nameLength = nameLength;
+            this.tslc = tslc;
+            this.fanOut = fanOut;
+            this.buggy = buggy;
+        }
     }
 
     private static void writeMethodMetrics(
@@ -385,19 +434,7 @@ public class MetricExtractor {
             Path path,
             Date releaseDate,
             Git git,
-            String methodName,
-            String releaseId,
-            int loc,
-            int paramCount,
-            int statements,
-            int cyclomatic,
-            int nesting,
-            int cognitive,
-            int smells,
-            int nameLength,
-            long tslc,
-            int fanOut,
-            boolean buggy,
+            MethodMetrics metrics,
             PrintWriter writer
     ) {
         try {
@@ -409,12 +446,12 @@ public class MetricExtractor {
 
             writer.println(String.format(
                     "%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
-                    methodName, releaseId, loc, paramCount, statements,
-                    cyclomatic, nesting, cognitive, smells, modifications,
-                    authors, nameLength, tslc, fanOut, buggy ? 1 : 0, path.toString()
+                    metrics.methodName, metrics.releaseId, metrics.loc, metrics.paramCount, metrics.statements,
+                    metrics.cyclomatic, metrics.nesting, metrics.cognitive, metrics.smells, modifications,
+                    authors, metrics.nameLength, metrics.tslc, metrics.fanOut, metrics.buggy ? 1 : 0, path.toString()
             ));
         } catch (IOException | org.eclipse.jgit.api.errors.GitAPIException e) {
-            LOGGER.warning("Errore nelle metriche storiche per " + methodName + ": " + e.getMessage());
+            LOGGER.warning("Errore nelle metriche storiche per " + metrics.methodName + ": " + e.getMessage());
         }
     }
 }
