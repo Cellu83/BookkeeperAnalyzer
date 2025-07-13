@@ -33,8 +33,16 @@ class MetricExtractionException extends Exception {
 /**
  * Classe responsabile per l'estrazione di metriche statiche e storiche dai metodi Java
  * all'interno di una repository Git, in base alle release specificate e ai commit legati a bug fix.
+ *
+ * Legge il file VersionInfo.csv (già preparato prima con ReleaseInfoFetcher)
+ * 	•	Per ogni release:
+ * 	•	Filtra i commit di fix anteriori alla data della release
+ * 	•	Identifica il commit della release (più recente ma non oltre la data)
+ * 	•	Fa il checkout a quel commit
+ * 	•	Analizza tutti i .java → estrae le metriche per ogni metodo
  */
 public class MetricExtractor {
+    private static final String CSV_SUFFIX = "new"; // Cambia in "old" per generare il CSV vecchio
     private static final String JAVA_EXTENSION = ".java";
     private static final String CSV_DELIMITER = ",";
     private static final String METRICS_FILE_PREFIX = "metrics_";
@@ -82,13 +90,17 @@ public class MetricExtractor {
     ) throws MetricExtractionException {
         final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
         String versionFilePath = projectName.toUpperCase() + VERSION_INFO_SUFFIX;
-        String metricsFilePath = METRICS_FILE_PREFIX + projectName.toLowerCase() + METRICS_FILE_SUFFIX;
+        // Permette di distinguere tra CSV "old" e "new" tramite CSV_SUFFIX
+        String suffix = CSV_SUFFIX;
+        String metricsFilePath = METRICS_FILE_PREFIX + projectName.toLowerCase() + suffix + METRICS_FILE_SUFFIX;
 
         try (
                 BufferedReader versionReader = new BufferedReader(new FileReader(versionFilePath));
                 PrintWriter writer = new PrintWriter(new FileWriter(metricsFilePath, false))
         ) {
             writeMetricsHeader(writer);
+
+            versionReader.readLine();
 
             // Leggi le versioni dal file CSV
             String line;
@@ -119,7 +131,7 @@ public class MetricExtractor {
 
     private static void writeMetricsHeader(PrintWriter writer) {
         writer.println("Method,ReleaseId,LOC,ParamCount,Statements,Cyclomatic,Nesting,Cognitive,Smells," +
-                "Modifications,Authors,NameLength,TSLC,FanOut,Buggy,File");
+                "Modifications,Authors,NameLength,TSLC,FanOut,Buggy,File,CommitHash");
     }
 
     private static void filterTicketCommitsByDate(Map<String, List<RevCommit>> ticketCommits, Date releaseDate) {
@@ -254,14 +266,20 @@ private static int countStatements(MethodDeclaration method) {
 
     private static long calculateTSLC(Path path, Date releaseDate, Git git) {
         try {
+            String relPath = path.toAbsolutePath().toString()
+                .replace(git.getRepository().getWorkTree().getAbsolutePath(), "")
+                .replace(File.separatorChar, '/')
+                .replaceAll("^/", ""); // rimuove eventuale slash iniziale
+
             Iterable<RevCommit> commits = git.log()
-                    .addPath(path.toString().replace("\\\\", "/"))
+                    .addPath(relPath)
                     .call();
+
             for (RevCommit c : commits) {
                 Date commitDate = c.getAuthorIdent().getWhen();
                 if (!commitDate.after(releaseDate)) {
                     long diffMillis = releaseDate.getTime() - commitDate.getTime();
-                    return diffMillis / (1000 * 60 * 60 * 24);  // Converti in giorni
+                    return diffMillis / (1000 * 60 * 60 * 24);  // giorni
                 }
             }
         } catch (Exception e) {
@@ -328,38 +346,42 @@ private static int countStatements(MethodDeclaration method) {
         }
     }
 
-    private static boolean isBuggy(
-            MethodDeclaration method,
-            Path path,
-            Date releaseDate,
-            Git git,
-            Map<String, List<RevCommit>> ticketCommits
-    ) {
-        try {
-            if (method.getBegin().isEmpty() || method.getEnd().isEmpty()) {
-                return false;
-            }
-            int methodStart = method.getBegin().map(pos -> pos.line).orElse(-1);
-            int methodEnd = method.getEnd().map(pos -> pos.line).orElse(-1);
+private static boolean isBuggy(
+        MethodDeclaration method,
+        Path path,
+        Date releaseDate,
+        Git git,
+        Map<String, List<RevCommit>> ticketCommits
+) {
+    String currentNormalized = null;
+    try {
+        if (method.getBegin().isEmpty() || method.getEnd().isEmpty()) {
+            return false;
+        }
+        int methodStart = method.getBegin().map(pos -> pos.line).orElse(-1);
+        int methodEnd = method.getEnd().map(pos -> pos.line).orElse(-1);
 
-            String currentNormalized = path.toString().replace("\\\\", "/");
+        currentNormalized = path.toString().replace("\\\\", "/");
 
-            for (List<RevCommit> commits : ticketCommits.values()) {
-                for (RevCommit commit : commits) {
-                    if (commit.getCommitTime() * 1000L > releaseDate.getTime() || commit.getParentCount() == 0) {
-                        continue;
-                    }
+        for (List<RevCommit> commits : ticketCommits.values()) {
+            for (RevCommit commit : commits) {
+                if (commit.getCommitTime() * 1000L > releaseDate.getTime() || commit.getParentCount() == 0) {
+                    continue;
+                }
 
-                    if (isMethodModifiedInCommit(commit, git, currentNormalized, methodStart, methodEnd)) {
-                        return true;
-                    }
+                if (isMethodModifiedInCommit(commit, git, currentNormalized, methodStart, methodEnd)) {
+                    System.out.printf(">> BUGGY METHOD: %s in file %s at release date %s (commit %s)%n",
+                            method.getNameAsString(), currentNormalized, releaseDate.toString(), commit.getName());
+                    return true;
                 }
             }
-        } catch (Exception e) {
-            LOGGER.warning("Errore nel determinare se il metodo è buggy: " + e.getMessage());
         }
-        return false;
+    } catch (Exception e) {
+        LOGGER.warning("Errore nel determinare se il metodo è buggy: " + e.getMessage());
     }
+    System.out.printf(">> CLEAN METHOD: %s in file %s%n", method.getNameAsString(), currentNormalized);
+    return false;
+}
 
 private static boolean isMethodModifiedInCommit(
         RevCommit commit,
@@ -387,7 +409,8 @@ private static boolean isMethodModifiedInFile(DiffFormatter df, DiffEntry diff, 
     if (modifiedPath.endsWith(JAVA_EXTENSION)) {
         String normalizedModified = modifiedPath.replace("\\\\", "/");
 
-        if (normalizedModified.equals(currentFilePath)) {
+        if (currentFilePath.endsWith(normalizedModified)) {
+            System.out.printf(">> File match: %s ends with %s%n", currentFilePath, normalizedModified);
             List<Edit> edits = df.toFileHeader(diff).toEditList();
 
             for (Edit edit : edits) {
@@ -395,6 +418,8 @@ private static boolean isMethodModifiedInFile(DiffFormatter df, DiffEntry diff, 
                 int editEnd = edit.getEndB();
 
                 if (editEnd >= methodStart && editStart <= methodEnd) {
+                    System.out.printf(">> BUGGY detected: method lines [%d-%d] overlap edit [%d-%d]%n",
+                        methodStart, methodEnd, editStart, editEnd);
                     return true;
                 }
             }
@@ -453,14 +478,37 @@ private static boolean isMethodModifiedInFile(DiffFormatter df, DiffEntry diff, 
             int modifications = historical.getModifications();
             int authors = historical.getAuthors().size();
 
+            String commitHash = findLatestCommitHashBeforeRelease(path, releaseDate, git);
             writer.println(String.format(
-                    "%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
+                    "%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s",
                     metrics.methodName, metrics.releaseId, metrics.loc, metrics.paramCount, metrics.statements,
                     metrics.cyclomatic, metrics.nesting, metrics.cognitive, metrics.smells, modifications,
-                    authors, metrics.nameLength, metrics.tslc, metrics.fanOut, metrics.buggy ? 1 : 0, path.toString()
+                    authors, metrics.nameLength, metrics.tslc, metrics.fanOut, metrics.buggy ? "YES" : "NO",
+                    path.toString(), commitHash
             ));
         } catch (IOException | org.eclipse.jgit.api.errors.GitAPIException e) {
             LOGGER.warning("Errore nelle metriche storiche per " + metrics.methodName + ": " + e.getMessage());
         }
+    }
+
+    private static String findLatestCommitHashBeforeRelease(Path path, Date releaseDate, Git git) {
+        try {
+            String relPath = path.toAbsolutePath().toString()
+                    .replace(git.getRepository().getWorkTree().getAbsolutePath(), "")
+                    .replace(File.separatorChar, '/')
+                    .replaceAll("^/", "");
+
+            Iterable<RevCommit> commits = git.log().addPath(relPath).call();
+
+            for (RevCommit commit : commits) {
+                Date commitDate = commit.getAuthorIdent().getWhen();
+                if (!commitDate.after(releaseDate)) {
+                    return commit.getName(); // SHA-1 del commit
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warning("Errore nel recupero del commit per " + path + ": " + e.getMessage());
+        }
+        return "UNKNOWN";
     }
 }

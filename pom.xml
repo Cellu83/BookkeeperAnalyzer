@@ -39,6 +39,12 @@
         </dependency>
 
         <dependency>
+            <groupId>nz.ac.waikato.cms.weka</groupId>
+            <artifactId>weka-stable</artifactId>
+            <version>3.8.6</version> <!-- o una versione compatibile -->
+        </dependency>
+
+        <dependency>
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
             <version>20230227</version>

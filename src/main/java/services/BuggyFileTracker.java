@@ -19,11 +19,7 @@ public final class BuggyFileTracker {
      * Utile per valutare se un file è buggy prima di una determinata release.
      * Per ogni commit di fix associato a un ticket, associa i file modificati
      * come buggy alla release precedente (tramite timestamp: il commitTime del parent).
-     *
-     * @param ticketCommits mappa {ticketID → lista di commit di fix}
-     * @param git repository
-     * @return mappa {filePath → lista di timestamp (millisecondi) in cui era buggy (release precedente al fix)}
-     */
+     **/
     public static Map<String, List<Long>> collectBuggyFileHistory(Map<String, List<RevCommit>> ticketCommits, Git git) throws IOException {
         Map<String, List<Long>> buggyFileHistory = new HashMap<>();
 

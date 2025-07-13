@@ -16,7 +16,6 @@ import java.util.logging.Logger; */
  */
 public class BugCommitMatcher {
 
-    /**private static final Logger LOGGER = Logger.getLogger(BugCommitMatcher.class.getName()); */
     private static final int MAX_HEURISTIC_DATE_DIFF_DAYS = 2;
     private static final String DATE_FORMAT_PATTERN = "yyyy-MM-dd";
 
@@ -24,15 +23,7 @@ public class BugCommitMatcher {
         // Costruttore privato per evitare l'istanziazione della classe utility
     }
 
-    /**
-     * Mappa ciascun ticket ID a una lista di commit che contengono l'ID nel messaggio del commit.
-     *
-     * @param bugTickets mappa {ticketId → resolutionDate}
-     * @param git istanza Git già inizializzata sul repo
-     * @return mappa {ticketId → lista di commit che lo menzionano}
-     * @throws IOException in caso di errore durante l'accesso al repository
-     * @throws GitAPIException in caso di errore durante le operazioni Git
-     */
+    //Prende tutti i commit da git e passa a processcommit e crea una mappa
     public static Map<String, List<RevCommit>> mapTicketsToCommits(Map<String, String> bugTickets, Git git) throws IOException, GitAPIException {
         Map<String, List<RevCommit>> ticketToCommitsMap = new HashMap<>();
         Set<String> matchedTickets = new HashSet<>();
@@ -46,7 +37,7 @@ public class BugCommitMatcher {
 
         return ticketToCommitsMap;
     }
-
+    // per ogni commit del repo, controlla se è associabile a uno dei ticket.
     private static void processCommits(
             Iterable<RevCommit> commits,
             Map<String, String> bugTickets,
@@ -70,6 +61,7 @@ public class BugCommitMatcher {
         }
     }
 
+    // aggiorna la mappa ticket → commit e segna il ticket come già associato (matchedTickets)
     private static void addCommitToTicket(
             Map<String, List<RevCommit>> ticketToCommitsMap,
             Set<String> matchedTickets,
@@ -80,12 +72,14 @@ public class BugCommitMatcher {
         matchedTickets.add(ticketId);
     }
 
+        // verifica se un commit menziona il ticket nel messaggio.
     private static boolean matchesTicket(String commitMessage, String ticketId) {
         String normalizedTicketId = ticketId.toLowerCase();
         String alternativeFormat = normalizedTicketId.replace("-", "_");
         return commitMessage.contains(normalizedTicketId) || commitMessage.contains(alternativeFormat);
     }
 
+    // se non è stato trovato un match diretto, controlla se il commit è vicino (±2 giorni) alla resolutionDate del ticket.
     private static boolean isHeuristicMatch(RevCommit commit, String ticketResolutionDate) {
         if (ticketResolutionDate == null || ticketResolutionDate.isEmpty()) {
             return false;

@@ -32,6 +32,7 @@ public class JiraTicketFetcher {
         }
     }
 
+    //Il filtro dei ticket avviene direttamente nella costruzione dell’URL API JIRA, nel metodo:
     private static String buildJiraQueryUrl(String projectKey, int startAt, int maxResults) {
         return "https://issues.apache.org/jira/rest/api/2/search?jql=project=%22"
                 + projectKey + "%22%20AND%20issuetype=%22Bug%22%20AND%20(status=%22closed%22%20OR%20status=%22resolved%22)%20AND%20resolution=%22fixed%22"
@@ -40,7 +41,7 @@ public class JiraTicketFetcher {
 
     /**
      * Recupera tutti i ticket di tipo "Bug" chiusi e fissati per il progetto specificato,
-     * restituendo una mappa {ticket ID -> resolutionDate}.
+     * restituendo una mappa {ticket ID -> resolutionDate}.poi passiamo a bugcommitmatcher
      */
     public static Map<String, String> fetchFixedBugTickets(String projectKey) throws IOException {
         Map<String, String> ticketMap = new HashMap<>();
