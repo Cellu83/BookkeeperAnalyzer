@@ -1,5 +1,7 @@
 package services;
 
+import services.TicketInfo;
+
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;
@@ -66,8 +68,9 @@ public class MetricExtractor {
         String projectName = System.getenv().getOrDefault(ENV_PROJECT_NAME, DEFAULT_PROJECT);
 
         try (Git git = Git.open(new File(repoDir, ".git"))) {
-            Map<String, String> bugTickets = JiraTicketFetcher.fetchFixedBugTickets(projectName.toUpperCase());
-            Map<String, List<RevCommit>> ticketCommits = BugCommitMatcher.mapTicketsToCommits(bugTickets, git);
+            Map<String, TicketInfo> bugTickets = JiraTicketFetcher.fetchFixedBugTickets(projectName.toUpperCase());
+            String repoPath = repoDir.getAbsolutePath();
+            Map<String, TicketInfo> ticketCommits = BugCommitMatcher.mapTicketsToCommits(bugTickets, git, repoPath);
 
             JavaParser parser = new JavaParser();
             HistoricalMetricsExtractor historicalExtractor = new HistoricalMetricsExtractor();
@@ -86,7 +89,7 @@ public class MetricExtractor {
             Git git,
             JavaParser parser,
             HistoricalMetricsExtractor historicalExtractor,
-            Map<String, List<RevCommit>> ticketCommits
+            Map<String, TicketInfo> ticketCommits
     ) throws MetricExtractionException {
         final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
         String versionFilePath = projectName.toUpperCase() + VERSION_INFO_SUFFIX;
@@ -134,14 +137,21 @@ public class MetricExtractor {
                 "Modifications,Authors,NameLength,TSLC,FanOut,Buggy,File,CommitHash");
     }
 
-    private static void filterTicketCommitsByDate(Map<String, List<RevCommit>> ticketCommits, Date releaseDate) {
-        ticketCommits.forEach((ticket, commits) ->
-            commits.removeIf(c -> c.getCommitTime() * 1000L > releaseDate.getTime()));
-
+    private static void filterTicketCommitsByDate(Map<String, TicketInfo> ticketCommits, Date releaseDate) {
+        ticketCommits.forEach((ticket, ticketInfo) -> {
+            List<RevCommit> commits = (List<RevCommit>) ticketInfo.getAssociatedCommits();
+            commits.removeIf(c -> c.getCommitTime() * 1000L > releaseDate.getTime());
+        });
     }
 
     private static RevCommit findReleaseCommit(Git git, Date releaseDate) throws Exception {
-        git.checkout().setName(MASTER_BRANCH).call();
+        // Rimuove file problematici prima del checkout, se presenti
+        File repoDir = git.getRepository().getWorkTree();
+        Path fileToRemove = Paths.get(repoDir.getAbsolutePath(), "src", "lastRevision.bat");
+        if (Files.exists(fileToRemove)) {
+            Files.delete(fileToRemove);
+        }
+        git.checkout().setName(MASTER_BRANCH).setForced(true).call();
         RevCommit bestCommit = null;
 
         for (RevCommit commit : git.log().call()) {
@@ -156,16 +166,19 @@ public class MetricExtractor {
     }
 
     private static void checkoutCommit(Git git, RevCommit commit) throws Exception {
-        git.checkout().setName(commit.getName()).call();
+        git.checkout()
+                .setName(commit.getName())
+                .setForced(true)
+                .call();
         LOGGER.info(() -> String.format("Checked out commit %s", commit.getName()));
     }
 
     private static class ReleaseContext {
         final Date releaseDate;
         final String releaseId;
-        final Map<String, List<RevCommit>> ticketCommits;
+        final Map<String, TicketInfo> ticketCommits;
 
-        ReleaseContext(Date releaseDate, String releaseId, Map<String, List<RevCommit>> ticketCommits) {
+        ReleaseContext(Date releaseDate, String releaseId, Map<String, TicketInfo> ticketCommits) {
             this.releaseDate = releaseDate;
             this.releaseId = releaseId;
             this.ticketCommits = ticketCommits;
@@ -351,7 +364,7 @@ private static boolean isBuggy(
         Path path,
         Date releaseDate,
         Git git,
-        Map<String, List<RevCommit>> ticketCommits
+        Map<String, TicketInfo> ticketCommits
 ) {
     String currentNormalized = null;
     try {
@@ -363,9 +376,12 @@ private static boolean isBuggy(
 
         currentNormalized = path.toString().replace("\\\\", "/");
 
-        for (List<RevCommit> commits : ticketCommits.values()) {
-            for (RevCommit commit : commits) {
+        for (TicketInfo ticket : ticketCommits.values()) {
+            for (RevCommit commit : ticket.getAssociatedCommits()) {
                 if (commit.getCommitTime() * 1000L > releaseDate.getTime() || commit.getParentCount() == 0) {
+                    continue;
+                }
+                if (!ticket.getBuggyMethods().contains(method.getNameAsString())) {
                     continue;
                 }
 

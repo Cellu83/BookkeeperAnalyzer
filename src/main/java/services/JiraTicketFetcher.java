@@ -3,10 +3,15 @@ package services;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.api.Git;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 
 public class JiraTicketFetcher {
@@ -36,15 +41,15 @@ public class JiraTicketFetcher {
     private static String buildJiraQueryUrl(String projectKey, int startAt, int maxResults) {
         return "https://issues.apache.org/jira/rest/api/2/search?jql=project=%22"
                 + projectKey + "%22%20AND%20issuetype=%22Bug%22%20AND%20(status=%22closed%22%20OR%20status=%22resolved%22)%20AND%20resolution=%22fixed%22"
-                + "&fields=key,resolutiondate&startAt=" + startAt + "&maxResults=" + maxResults;
+                + "&fields=key,resolutiondate,creator&startAt=" + startAt + "&maxResults=" + maxResults;
     }
 
     /**
      * Recupera tutti i ticket di tipo "Bug" chiusi e fissati per il progetto specificato,
-     * restituendo una mappa {ticket ID -> resolutionDate}.poi passiamo a bugcommitmatcher
+     * restituendo una mappa {ticket ID -> TicketInfo}.poi passiamo a bugcommitmatcher
      */
-    public static Map<String, String> fetchFixedBugTickets(String projectKey) throws IOException {
-        Map<String, String> ticketMap = new HashMap<>();
+    public static Map<String, TicketInfo> fetchFixedBugTickets(String projectKey) throws IOException {
+        Map<String, TicketInfo> ticketMap = new HashMap<>();
         int startAt = 0;
         int total;
         do {
@@ -61,7 +66,10 @@ public class JiraTicketFetcher {
                 JSONObject issue = issues.getJSONObject(idx);
                 String key = issue.getString("key");
                 String resolutionDate = issue.getJSONObject("fields").optString("resolutiondate", "");
-                ticketMap.put(key, resolutionDate);
+                String author = issue.getJSONObject("fields").optJSONObject("creator") != null
+                    ? issue.getJSONObject("fields").getJSONObject("creator").optString("displayName", "")
+                    : "";
+                ticketMap.put(key, new TicketInfo(key, resolutionDate, author, new HashSet<>()));
             }
         } while (startAt < total);
         return ticketMap;

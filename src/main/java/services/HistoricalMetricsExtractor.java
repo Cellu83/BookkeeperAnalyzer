@@ -1,5 +1,7 @@
 package services;
 
+// Questa classe calcola il numero di modifiche a un file e l'elenco degli autori
+// che lo hanno modificato prima di una certa data.
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
@@ -13,6 +15,7 @@ import java.util.*;
 
 public class HistoricalMetricsExtractor {
 
+    // Contenitore dei risultati: numero di modifiche e autori unici.
     public static class HistoricalMetrics {
         private int modifications;
         private final Set<String> authors;
@@ -22,15 +25,19 @@ public class HistoricalMetricsExtractor {
             this.authors = authors;
         }
 
+        // Restituisce il numero di commit che hanno modificato il file.
         public int getModifications() {
             return modifications;
         }
 
+        // Restituisce l'insieme degli autori che hanno modificato il file.
         public Set<String> getAuthors() {
             return authors;
         }
     }
 
+    // Dato un file, una data di rilascio e un repository Git, restituisce il numero di modifiche
+    // e gli autori che hanno contribuito a quel file prima della data specificata.
     public HistoricalMetrics extract(Path filePath, Date releaseDate, Git git) throws IOException, org.eclipse.jgit.api.errors.GitAPIException {
         Repository repo = git.getRepository();
 
