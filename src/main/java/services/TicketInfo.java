@@ -9,14 +9,12 @@ public class TicketInfo {
     private final String ticketID;
     private final String resolutionDate;
     private final String author;
-    private final Set<String> affectedMethods;
     private final Set<RevCommit> associatedCommits = new HashSet<>();
 
-    public TicketInfo(String ticketID, String resolutionDate, String author, Set<String> affectedMethods) {
+    public TicketInfo(String ticketID, String resolutionDate, String author) {
         this.ticketID = ticketID;
         this.resolutionDate = resolutionDate;
         this.author = author;
-        this.affectedMethods = affectedMethods != null ? affectedMethods : new HashSet<>();
     }
 
     public String getResolutionDate() {
@@ -25,18 +23,6 @@ public class TicketInfo {
 
     public String getAuthor() {
         return author;
-    }
-
-    public void addAffectedMethod(String methodSignature) {
-        this.affectedMethods.add(methodSignature);
-    }
-
-    public Set<String> getAffectedMethods(String repoPath) {
-        return affectedMethods;
-    }
-
-    public Set<String> getBuggyMethods() {
-        return affectedMethods;
     }
 
     public Set<RevCommit> getAssociatedCommits() {

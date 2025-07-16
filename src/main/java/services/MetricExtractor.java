@@ -1,6 +1,5 @@
 package services;
 
-import services.SZZAnalyzer;
 
 import services.TicketInfo;
 import com.github.javaparser.JavaParser;
@@ -76,12 +75,12 @@ public class MetricExtractor {
             for (Map.Entry<String, TicketInfo> entry : ticketCommits.entrySet()) {
                 commitMap.put(entry.getKey(), (List<RevCommit>) entry.getValue().getAssociatedCommits());
             }
-            Map<String, Set<String>> affectedMethodsMap = SZZAnalyzer.analyze(commitMap, git, repoPath);
+           // Map<String, Set<String>> affectedMethodsMap = SZZAnalyzer.analyze(commitMap, git, repoPath);
 
             JavaParser parser = new JavaParser();
             HistoricalMetricsExtractor historicalExtractor = new HistoricalMetricsExtractor();
 
-            processReleases(projectName, repoDir, git, parser, historicalExtractor, ticketCommits, affectedMethodsMap);
+            //processReleases(projectName, repoDir, git, parser, historicalExtractor, ticketCommits, affectedMethodsMap);
         } catch (IOException e) {
             throw new MetricExtractionException("Errore durante l'apertura della repository Git", e);
         } catch (Exception e) {

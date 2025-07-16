@@ -69,7 +69,7 @@ public class JiraTicketFetcher {
                 String author = issue.getJSONObject("fields").optJSONObject("creator") != null
                     ? issue.getJSONObject("fields").getJSONObject("creator").optString("displayName", "")
                     : "";
-                ticketMap.put(key, new TicketInfo(key, resolutionDate, author, new HashSet<>()));
+                ticketMap.put(key, new TicketInfo(key, resolutionDate, author));
             }
         } while (startAt < total);
         return ticketMap;

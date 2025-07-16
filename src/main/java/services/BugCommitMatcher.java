@@ -19,7 +19,7 @@ import org.eclipse.jgit.patch.FileHeader;
 import org.eclipse.jgit.patch.HunkHeader;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 /** import java.util.logging.Level;
-import java.util.logging.Logger; */
+ import java.util.logging.Logger; */
 
 /**
  * Classe utility per associare i ticket di bug ai relativi commit.
@@ -36,7 +36,7 @@ public class BugCommitMatcher {
 
     //Prende tutti i commit da git e passa a processcommit e crea una mappa
     public static Map<String, TicketInfo> mapTicketsToCommits(Map<String, TicketInfo> bugTickets, Git git, String repoPath) throws IOException, GitAPIException {
-        Map<String, TicketInfo> ticketToCommitsMap = new HashMap<>();
+        Map<String, TicketInfo> ticketToCommitsMap = new HashMap<>(bugTickets);
         Set<String> matchedTickets = new HashSet<>();
 
         try {
@@ -57,26 +57,30 @@ public class BugCommitMatcher {
             String repoPath) {
 
         for (RevCommit commit : commits) {
+
             String commitMessage = commit.getFullMessage().toLowerCase();
 
             for (Map.Entry<String, TicketInfo> entry : bugTickets.entrySet()) {
                 String ticketId = entry.getKey();
                 TicketInfo ticketInfo = entry.getValue();
-                ticketInfo.getAffectedMethods(repoPath);
                 String resolutionDate = ticketInfo.getResolutionDate();
                 String jiraAuthor = ticketInfo.getAuthor();
-                Set<String> methodSignatures = ticketInfo.getAffectedMethods(repoPath);
 
                 boolean isDirectMatch = matchesTicket(commitMessage, ticketId);
                 if (isDirectMatch) {
+                    // Associazione diretta trovata (ID ticket nel messaggio del commit)
                 }
+
                 boolean isHeuristicMatch = !matchedTickets.contains(ticketId) &&
-                    isHeuristicMatch(commit, resolutionDate, jiraAuthor, methodSignatures);
+                        isHeuristicMatch(commit, resolutionDate, jiraAuthor);
                 if (isHeuristicMatch) {
+                    // Associazione euristica trovata (autore e data compatibili)
                 } else {
+                    // Nessuna corrispondenza trovata
                 }
 
                 if (isDirectMatch || isHeuristicMatch) {
+                    System.out.println("Associazione trovata: " + ticketId + " <-- " + commit.getName());
                     addCommitToTicket(ticketToCommitsMap, matchedTickets, ticketId, commit);
                 }
             }
@@ -96,7 +100,7 @@ public class BugCommitMatcher {
         matchedTickets.add(ticketId);
     }
 
-        // verifica se un commit menziona il ticket nel messaggio.
+    // verifica se un commit menziona il ticket nel messaggio.
     private static boolean matchesTicket(String commitMessage, String ticketId) {
         String normalizedTicketId = ticketId.toLowerCase();
         String alternativeFormat = normalizedTicketId.replace("-", "_");
@@ -104,7 +108,7 @@ public class BugCommitMatcher {
     }
 
     // Match euristico: commit entro ±2 giorni dalla risoluzione, autore corrispondente e riferimento al metodo nel messaggio
-    private static boolean isHeuristicMatch(RevCommit commit, String ticketResolutionDate, String jiraAuthor, Set<String> methodSignatures) {
+    private static boolean isHeuristicMatch(RevCommit commit, String ticketResolutionDate, String jiraAuthor) {
         if (ticketResolutionDate == null || ticketResolutionDate.isEmpty()) {
             return false;
         }
@@ -118,10 +122,6 @@ public class BugCommitMatcher {
 
             String commitAuthor = commit.getAuthorIdent().getName();
             if (!commitAuthor.equalsIgnoreCase(jiraAuthor)) return false;
-
-            if (methodSignatures.stream().noneMatch(sig -> commit.getFullMessage().contains(sig))) {
-                return false;
-            }
 
             return true;
         } catch (ParseException _) {
@@ -137,45 +137,45 @@ public class BugCommitMatcher {
         long diffMillis = Math.abs(date1.getTime() - date2.getTime());
         return diffMillis / (1000 * 60 * 60 * 24);
     }
-    // --- MAIN METHOD FOR COMMAND LINE USAGE ---
-    public static void main(String[] args) {
-        if (args.length != 2) {
-            System.out.println("Usage: BugCommitMatcher <projectKey> <repoPath>");
-            return;
+    public static void main(String[] args) throws Exception {
+        String repoPath = "/Users/colaf/Documents/ISW2/zookeeper/zookeeper/.git";
+        String projectKey = "ZOOKEEPER";
+
+        System.out.println("Fetching tickets from JIRA...");
+        Map<String, TicketInfo> bugTickets = JiraTicketFetcher.fetchFixedBugTickets(projectKey);
+        for (Map.Entry<String, TicketInfo> entry : bugTickets.entrySet()) {
+            String ticketId = entry.getKey();
+            TicketInfo info = entry.getValue();
+            System.out.println("Ticket ID: " + ticketId);
+            System.out.println("  Author: " + info.getAuthor());
+            System.out.println("  Resolution Date: " + info.getResolutionDate());
         }
 
-        String projectKey = args[0];
-        String repoPath = args[1];
+        System.out.println("Matching commits to tickets...");
+        // Tenta di associare i commit ai ticket, includendo anche le associazioni dirette (ID ticket nel messaggio del commit)
+        Map<String, TicketInfo> commitToTicketMap = BugCommitMatcher.mapTicketsToCommits(
+            bugTickets,
+            Git.open(new File(repoPath)),
+            repoPath
+        );
 
-        try (Git git = Git.open(new File(repoPath))) {
-            Map<String, TicketInfo> jiraTickets = JiraTicketFetcher.fetchFixedBugTickets(projectKey);
-            Map<String, TicketInfo> matchedTickets = new HashMap<>();
-
-            for (RevCommit commit : git.log().all().call()) {
-                String message = commit.getFullMessage().toLowerCase();
-                for (Map.Entry<String, TicketInfo> entry : jiraTickets.entrySet()) {
-                    String ticketId = entry.getKey();
-                    if (matchesTicket(message, ticketId)) {
-                        matchedTickets
-                            .computeIfAbsent(ticketId, k -> new TicketInfo(
-                                ticketId,
-                                entry.getValue().getResolutionDate(),
-                                entry.getValue().getAuthor(),
-                                entry.getValue().getAffectedMethods(repoPath)))
-                            .addAssociatedCommit(commit);
-                    }
-                }
+        System.out.println("\n=== Risultati BugCommitMatcher ===");
+        for (Map.Entry<String, TicketInfo> entry : commitToTicketMap.entrySet()) {
+            System.out.println("Ticket: " + entry.getKey());
+            System.out.println("  Associated Commits:");
+            for (RevCommit commit : entry.getValue().getAssociatedCommits()) {
+                System.out.println("    - " + commit.getName() + ": " + commit.getShortMessage());
             }
+        }
 
-            for (Map.Entry<String, TicketInfo> entry : matchedTickets.entrySet()) {
-                System.out.println("Ticket: " + entry.getKey());
-                for (RevCommit commit : entry.getValue().getAssociatedCommits()) {
-                    System.out.println("  Commit: " + commit.getName() + " - " + commit.getShortMessage());
-                }
+        System.out.println("\n=== Riepilogo Finale: Ticket con Commit Associati ===");
+        for (Map.Entry<String, TicketInfo> entry : commitToTicketMap.entrySet()) {
+            String ticketId = entry.getKey();
+            TicketInfo ticket = entry.getValue();
+            System.out.println("Ticket: " + ticketId);
+            for (RevCommit commit : ticket.getAssociatedCommits()) {
+                System.out.println("  - Commit: " + commit.getName() + " | " + commit.getShortMessage());
             }
-
-        } catch (Exception e) {
-            e.printStackTrace();
         }
     }
 }
