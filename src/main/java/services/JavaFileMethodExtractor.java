@@ -95,6 +95,54 @@ public class JavaFileMethodExtractor {
             }
         }
     }
+    public static Set<String> extractModifiedMethodsFromDiff(Repository repository, DiffEntry diff) {
+        Set<String> modifiedMethods = new HashSet<>();
+        try (DiffFormatter diffFormatter = new DiffFormatter(new ByteArrayOutputStream())) {
+            diffFormatter.setRepository(repository);
+            diffFormatter.setDiffComparator(RawTextComparator.DEFAULT);
+            diffFormatter.setDetectRenames(true);
+
+            if (!diff.getNewPath().endsWith(".java")) {
+                return modifiedMethods;
+            }
+
+            ObjectId blobId = diff.getNewId().toObjectId();
+            try (InputStream input = repository.open(blobId).openStream()) {
+                JavaParser parser = new JavaParser();
+                CompilationUnit cu = parser.parse(input).getResult().orElse(null);
+                if (cu != null) {
+                    cu.findAll(MethodDeclaration.class).forEach(method ->
+                            modifiedMethods.add(method.getDeclarationAsString(false, false, true))
+                    );
+                }
+            } catch (Exception e) {
+                // Skip parse error
+            }
+        }
+        return modifiedMethods;
+    }
+
+    public static List<DiffEntry> getDiffsBetweenCommits(Repository repository, RevCommit parent, RevCommit child) {
+        try {
+            CanonicalTreeParser oldTreeIter = new CanonicalTreeParser();
+            CanonicalTreeParser newTreeIter = new CanonicalTreeParser();
+            try (ObjectReader reader = repository.newObjectReader()) {
+                oldTreeIter.reset(reader, parent.getTree().getId());
+                newTreeIter.reset(reader, child.getTree().getId());
+            }
+
+            try (DiffFormatter diffFormatter = new DiffFormatter(new ByteArrayOutputStream())) {
+                diffFormatter.setRepository(repository);
+                diffFormatter.setDiffComparator(RawTextComparator.DEFAULT);
+                diffFormatter.setDetectRenames(true);
+                return diffFormatter.scan(oldTreeIter, newTreeIter);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return List.of();
+        }
+    }
 }
+
 
 

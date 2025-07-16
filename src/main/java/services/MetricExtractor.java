@@ -1,7 +1,8 @@
 package services;
 
-import services.TicketInfo;
+import services.SZZAnalyzer;
 
+import services.TicketInfo;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;
@@ -71,11 +72,16 @@ public class MetricExtractor {
             Map<String, TicketInfo> bugTickets = JiraTicketFetcher.fetchFixedBugTickets(projectName.toUpperCase());
             String repoPath = repoDir.getAbsolutePath();
             Map<String, TicketInfo> ticketCommits = BugCommitMatcher.mapTicketsToCommits(bugTickets, git, repoPath);
+            Map<String, List<RevCommit>> commitMap = new HashMap<>();
+            for (Map.Entry<String, TicketInfo> entry : ticketCommits.entrySet()) {
+                commitMap.put(entry.getKey(), (List<RevCommit>) entry.getValue().getAssociatedCommits());
+            }
+            Map<String, Set<String>> affectedMethodsMap = SZZAnalyzer.analyze(commitMap, git, repoPath);
 
             JavaParser parser = new JavaParser();
             HistoricalMetricsExtractor historicalExtractor = new HistoricalMetricsExtractor();
 
-            processReleases(projectName, repoDir, git, parser, historicalExtractor, ticketCommits);
+            processReleases(projectName, repoDir, git, parser, historicalExtractor, ticketCommits, affectedMethodsMap);
         } catch (IOException e) {
             throw new MetricExtractionException("Errore durante l'apertura della repository Git", e);
         } catch (Exception e) {
@@ -89,7 +95,8 @@ public class MetricExtractor {
             Git git,
             JavaParser parser,
             HistoricalMetricsExtractor historicalExtractor,
-            Map<String, TicketInfo> ticketCommits
+            Map<String, TicketInfo> ticketCommits,
+            Map<String, Set<String>> affectedMethodsMap
     ) throws MetricExtractionException {
         final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
         String versionFilePath = projectName.toUpperCase() + VERSION_INFO_SUFFIX;
@@ -121,7 +128,7 @@ public class MetricExtractor {
                         checkoutCommit(git, releaseCommit);
                         processJavaFiles(repoDir, parser, git,
                                 new ReleaseContext(releaseDate, releaseId, ticketCommits),
-                                historicalExtractor, writer);
+                                historicalExtractor, writer, affectedMethodsMap);
                     } else {
                         LOGGER.warning(() -> String.format("No commit found for release %s", releaseId));
                     }
@@ -165,11 +172,15 @@ public class MetricExtractor {
         return bestCommit;
     }
 
-    private static void checkoutCommit(Git git, RevCommit commit) throws Exception {
-        git.checkout()
+    private static void checkoutCommit(Git git, RevCommit commit) {
+        try {
+            git.checkout()
                 .setName(commit.getName())
-                .setForced(true)
                 .call();
+        } catch (Exception e) {
+            System.out.println(">> [WARNING] Skipping commit: " + commit.getName() + " - " + e.getMessage());
+            return;
+        }
         LOGGER.info(() -> String.format("Checked out commit %s", commit.getName()));
     }
 
@@ -191,9 +202,10 @@ public class MetricExtractor {
             Git git,
             ReleaseContext context,
             HistoricalMetricsExtractor historicalExtractor,
-            PrintWriter writer
+            PrintWriter writer,
+            Map<String, Set<String>> affectedMethodsMap
     ) throws IOException {
-        JavaProcessingContext processingContext = new JavaProcessingContext(git, context, historicalExtractor, writer);
+        JavaProcessingContext processingContext = new JavaProcessingContext(git, context, historicalExtractor, writer, affectedMethodsMap);
         try (Stream<Path> paths = Files.walk(repoDir.toPath())) {
             paths.filter(Files::isRegularFile)
                     .filter(p -> p.toString().endsWith(JAVA_EXTENSION))
@@ -209,12 +221,14 @@ public class MetricExtractor {
         final ReleaseContext releaseContext;
         final HistoricalMetricsExtractor historicalExtractor;
         final PrintWriter writer;
+        final Map<String, Set<String>> affectedMethodsMap;
 
-        JavaProcessingContext(Git git, ReleaseContext releaseContext, HistoricalMetricsExtractor historicalExtractor, PrintWriter writer) {
+        JavaProcessingContext(Git git, ReleaseContext releaseContext, HistoricalMetricsExtractor historicalExtractor, PrintWriter writer, Map<String, Set<String>> affectedMethodsMap) {
             this.git = git;
             this.releaseContext = releaseContext;
             this.historicalExtractor = historicalExtractor;
             this.writer = writer;
+            this.affectedMethodsMap = affectedMethodsMap;
         }
     }
 
@@ -228,7 +242,7 @@ public class MetricExtractor {
             if (compilationUnit == null) return;
 
             compilationUnit.findAll(MethodDeclaration.class).forEach(method ->
-                processMethod(method, path, context.git, context.releaseContext, context.historicalExtractor, context.writer));
+                processMethod(method, path, context.git, context.releaseContext, context.historicalExtractor, context.writer, context.affectedMethodsMap));
 
         } catch (Exception e) {
             LOGGER.warning("Errore nel parsing: " + path + " - " + e.getMessage());
@@ -241,7 +255,8 @@ public class MetricExtractor {
             Git git,
             ReleaseContext context,
             HistoricalMetricsExtractor historicalExtractor,
-            PrintWriter writer
+            PrintWriter writer,
+            Map<String, Set<String>> affectedMethodsMap
     ) {
         String methodName = method.getNameAsString();
         int paramCount = method.getParameters().size();
@@ -255,7 +270,7 @@ public class MetricExtractor {
         long tslc = calculateTSLC(path, context.releaseDate, git);
         int fanOut = method.findAll(MethodCallExpr.class).size();
 
-        boolean buggy = isBuggy(method, path, context.releaseDate, git, context.ticketCommits);
+        boolean buggy = isBuggy(method, path, context.releaseDate, git, affectedMethodsMap);
 
         MethodMetrics metrics = new MethodMetrics(
                 methodName, context.releaseId, loc, paramCount, statements,
@@ -364,38 +379,22 @@ private static boolean isBuggy(
         Path path,
         Date releaseDate,
         Git git,
-        Map<String, TicketInfo> ticketCommits
+        Map<String, Set<String>> affectedMethodsMap
 ) {
-    String currentNormalized = null;
     try {
-        if (method.getBegin().isEmpty() || method.getEnd().isEmpty()) {
-            return false;
-        }
-        int methodStart = method.getBegin().map(pos -> pos.line).orElse(-1);
-        int methodEnd = method.getEnd().map(pos -> pos.line).orElse(-1);
+        String methodCommitHash = findLatestCommitHashBeforeRelease(path, releaseDate, git);
+        if (methodCommitHash.equals("UNKNOWN")) return false;
 
-        currentNormalized = path.toString().replace("\\\\", "/");
+        String methodName = method.getNameAsString();
 
-        for (TicketInfo ticket : ticketCommits.values()) {
-            for (RevCommit commit : ticket.getAssociatedCommits()) {
-                if (commit.getCommitTime() * 1000L > releaseDate.getTime() || commit.getParentCount() == 0) {
-                    continue;
-                }
-                if (!ticket.getBuggyMethods().contains(method.getNameAsString())) {
-                    continue;
-                }
-
-                if (isMethodModifiedInCommit(commit, git, currentNormalized, methodStart, methodEnd)) {
-                    System.out.printf(">> BUGGY METHOD: %s in file %s at release date %s (commit %s)%n",
-                            method.getNameAsString(), currentNormalized, releaseDate.toString(), commit.getName());
-                    return true;
-                }
-            }
+        Set<String> affectedMethods = affectedMethodsMap.get(methodCommitHash);
+        if (affectedMethods != null && affectedMethods.contains(methodName)) {
+            System.out.printf(">> BUGGY METHOD via SZZ: %s (commit %s)%n", methodName, methodCommitHash);
+            return true;
         }
     } catch (Exception e) {
-        LOGGER.warning("Errore nel determinare se il metodo è buggy: " + e.getMessage());
+        LOGGER.warning("Errore nel determinare se il metodo è buggy via SZZ: " + e.getMessage());
     }
-    System.out.printf(">> CLEAN METHOD: %s in file %s%n", method.getNameAsString(), currentNormalized);
     return false;
 }
 

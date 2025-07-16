@@ -32,12 +32,6 @@ public class TicketInfo {
     }
 
     public Set<String> getAffectedMethods(String repoPath) {
-        if (affectedMethods.isEmpty()) {
-            for (RevCommit commit : associatedCommits) {
-                Set<String> methods = JavaFileMethodExtractor.extractModifiedMethodsFromCommit(repoPath, commit);
-                affectedMethods.addAll(methods);
-            }
-        }
         return affectedMethods;
     }
 
