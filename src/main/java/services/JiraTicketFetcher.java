@@ -20,6 +20,9 @@ public class JiraTicketFetcher {
         // Utility class
     }
 
+    /**
+     * Classe che rappresenta le informazioni di un ticket JIRA.
+     */
     private static String readAll(Reader rd) throws IOException {
         StringBuilder sb = new StringBuilder();
         int cp;
@@ -41,7 +44,7 @@ public class JiraTicketFetcher {
     private static String buildJiraQueryUrl(String projectKey, int startAt, int maxResults) {
         return "https://issues.apache.org/jira/rest/api/2/search?jql=project=%22"
                 + projectKey + "%22%20AND%20issuetype=%22Bug%22%20AND%20(status=%22closed%22%20OR%20status=%22resolved%22)%20AND%20resolution=%22fixed%22"
-                + "&fields=key,resolutiondate,creator&startAt=" + startAt + "&maxResults=" + maxResults;
+                + "&fields=key,resolutiondate,creator,created&startAt=" + startAt + "&maxResults=" + maxResults;
     }
 
     /**
@@ -64,12 +67,17 @@ public class JiraTicketFetcher {
             total = json.getInt("total");
             for (int idx = 0; idx < issues.length() && startAt < total; idx++, startAt++) {
                 JSONObject issue = issues.getJSONObject(idx);
+                // Estraggo i dati fondamentali del ticket
                 String key = issue.getString("key");
                 String resolutionDate = issue.getJSONObject("fields").optString("resolutiondate", "");
+                String createdDate = issue.getJSONObject("fields").optString("created", "");  // OV
                 String author = issue.getJSONObject("fields").optJSONObject("creator") != null
                     ? issue.getJSONObject("fields").getJSONObject("creator").optString("displayName", "")
                     : "";
-                ticketMap.put(key, new TicketInfo(key, resolutionDate, author));
+                // Log visivo sintetico
+                System.out.printf("Ticket trovato: %s | Created (OV): %s | Resolved (FV): %s%n", key, createdDate, resolutionDate);
+                // Inserisco nella mappa con OV (createdDate)
+                ticketMap.put(key, new TicketInfo(key, resolutionDate, createdDate, author));
             }
         } while (startAt < total);
         return ticketMap;

@@ -146,9 +146,7 @@ public class BugCommitMatcher {
         for (Map.Entry<String, TicketInfo> entry : bugTickets.entrySet()) {
             String ticketId = entry.getKey();
             TicketInfo info = entry.getValue();
-            System.out.println("Ticket ID: " + ticketId);
-            System.out.println("  Author: " + info.getAuthor());
-            System.out.println("  Resolution Date: " + info.getResolutionDate());
+            System.out.printf("Ticket: %s | Author: %s | Resolution Date: %s%n", ticketId, info.getAuthor(), info.getResolutionDate());
         }
 
         System.out.println("Matching commits to tickets...");
@@ -159,14 +157,6 @@ public class BugCommitMatcher {
             repoPath
         );
 
-        System.out.println("\n=== Risultati BugCommitMatcher ===");
-        for (Map.Entry<String, TicketInfo> entry : commitToTicketMap.entrySet()) {
-            System.out.println("Ticket: " + entry.getKey());
-            System.out.println("  Associated Commits:");
-            for (RevCommit commit : entry.getValue().getAssociatedCommits()) {
-                System.out.println("    - " + commit.getName() + ": " + commit.getShortMessage());
-            }
-        }
 
         System.out.println("\n=== Riepilogo Finale: Ticket con Commit Associati ===");
         for (Map.Entry<String, TicketInfo> entry : commitToTicketMap.entrySet()) {

@@ -1,3 +1,4 @@
+/*
 package services;
 
 import org.json.JSONArray;
@@ -20,7 +21,7 @@ import java.util.logging.Logger;
 /**
  * Classe per recuperare le informazioni sulle versioni rilasciate da un progetto JIRA.
  * Le informazioni vengono salvate in un file CSV.
- */
+
 
 
 public class ReleaseInfoFetcher {
@@ -160,3 +161,5 @@ public class ReleaseInfoFetcher {
                 dateTime);
     }
 }
+
+*/
